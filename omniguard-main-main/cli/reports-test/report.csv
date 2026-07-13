@@ -1,0 +1,3 @@
+ID,Scanner,Severity,Title,File,Line,CWE
+"SAST-INJ-001","undefined","critical","SQL Injection","db.js",12,"N/A"
+"IAC-SEC-001","undefined","high","Open Port 22","main.tf",4,"N/A"

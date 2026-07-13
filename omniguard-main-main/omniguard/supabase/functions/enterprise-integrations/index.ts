@@ -87,6 +87,31 @@ async function testOkta(domain: string, token: string): Promise<{ ok: boolean; m
   return { ok: true, message: `Okta connected (${d.profile?.login || "verified"})` };
 }
 
+async function testHashicorp(address: string, token: string): Promise<{ ok: boolean; message: string }> {
+  const r = await fetch(`${address.replace(/\/$/, '')}/v1/auth/token/lookup-self`, {
+    headers: { "X-Vault-Token": token },
+  });
+  if (!r.ok) return { ok: false, message: `Vault API error: ${r.status}` };
+  const d = await r.json();
+  return { ok: true, message: `Vault connected (token: ${d.data?.display_name || "verified"})` };
+}
+
+async function testServicenow(domain: string, username?: string, password?: string, token?: string): Promise<{ ok: boolean; message: string }> {
+  const url = `https://${domain.replace(/\/$/, '').replace(/^https?:\/\//, '')}/api/now/ui/concourse/user`;
+  const headers: Record<string, string> = { "Accept": "application/json" };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  } else if (username && password) {
+    headers["Authorization"] = `Basic ${btoa(`${username}:${password}`)}`;
+  } else {
+    return { ok: false, message: "Username/Password or OAuth token required" };
+  }
+  const r = await fetch(url, { headers });
+  if (!r.ok) return { ok: false, message: `ServiceNow API error: ${r.status}` };
+  const d = await r.json();
+  return { ok: true, message: `ServiceNow connected (${d.result?.user_name || "verified"})` };
+}
+
 // Integration action functions
 async function createJiraTicket(config: Record<string, string>, finding: { title: string; severity: string; file_path: string; line_start: number; rule_id: string }): Promise<{ ok: boolean; key?: string; error?: string }> {
   const { domain, email, api_token, project_key } = config;
@@ -193,6 +218,12 @@ Deno.serve(async (req: Request) => {
         case "okta":
           result = await testOkta(config.domain, config.api_token);
           break;
+        case "hashicorp":
+          result = await testHashicorp(config.address, config.token);
+          break;
+        case "servicenow":
+          result = await testServicenow(config.domain, config.username, config.password, config.token);
+          break;
         default:
           return json({ success: false, message: `Unknown provider: ${provider}` }, 400);
       }
@@ -216,6 +247,8 @@ Deno.serve(async (req: Request) => {
           teams: ["webhook_url"],
           confluence: ["domain", "email", "api_token"],
           okta: ["domain", "api_token"],
+          hashicorp: ["address", "token"],
+          servicenow: ["domain"],
         };
         const required = requiredFields[provider] || [];
         const missing = required.filter(f => !config[f]);

@@ -1,6 +1,6 @@
 {
-  "name": "omniguard",
-  "version": "1.0.0",
+  "name": "omniguard-enterprise-cli",
+  "version": "2.1.1",
   "description": "OmniGuard - AI-Powered Application Security Platform CLI",
   "main": "src/index.js",
   "bin": {
@@ -9,12 +9,24 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": ["security", "appsec", "secrets", "sast", "devsecops"],
+  "keywords": [
+    "security",
+    "appsec",
+    "secrets",
+    "sast",
+    "devsecops"
+  ],
   "license": "MIT",
-  "files": ["src/"],
+  "files": [
+    "src/"
+  ],
   "scripts": {
     "start": "node src/index.js",
     "test": "node src/index.js version",
     "lint": "node -c src/index.js"
+  },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "js-yaml": "^5.2.1"
   }
 }

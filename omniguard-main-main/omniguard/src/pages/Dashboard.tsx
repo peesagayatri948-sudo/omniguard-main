@@ -52,13 +52,21 @@ export function Dashboard() {
     if (!currentOrganizationId) return
     {
 
+      // Get exact count of active high-risk threats from DB to bypass PostgREST max row limits (default 1000)
+      const { count: exactActiveThreatsCount } = await supabase
+        .from('findings')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', currentOrganizationId)
+        .in('severity', ['critical', 'high'])
+        .not('status', 'in', '("resolved","suppressed","false_positive")')
+
       // Get findings for posture calculation
       const { data: findings } = await supabase
         .from('findings')
         .select('severity, status, risk_score, created_at, resolved_at')
         .eq('organization_id', currentOrganizationId)
         .order('created_at', { ascending: false })
-        .limit(500)
+        .limit(200)
 
       if (findings && findings.length > 0) {
         // Calculate posture score (0-100)
@@ -120,7 +128,7 @@ export function Dashboard() {
       ).length || 0
 
       setThreats({
-        active_threats: openCritical + (findings?.filter(f => f.severity === 'high' && !['resolved', 'suppressed'].includes(f.status)).length || 0),
+        active_threats: exactActiveThreatsCount !== null ? exactActiveThreatsCount : (openCritical + (findings?.filter(f => f.severity === 'high' && !['resolved', 'suppressed'].includes(f.status)).length || 0)),
         mitigated_24h: resolved24h,
         pending_triage: recentOpen,
         mean_time_to_resolve: findings

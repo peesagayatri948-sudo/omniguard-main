@@ -6,5 +6,6 @@
     "test:cli": "bash scripts/test-cli.sh",
     "test:extension": "bash scripts/test-extension.sh",
     "deploy:aws:production": "bash scripts/deploy-aws-production.sh"
-  }
+  },
+  "version": "2.1.1"
 }

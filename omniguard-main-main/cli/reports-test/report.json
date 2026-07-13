@@ -1,0 +1,16 @@
+[
+  {
+    "rule_id": "SAST-INJ-001",
+    "title": "SQL Injection",
+    "severity": "critical",
+    "file_path": "db.js",
+    "line_start": 12
+  },
+  {
+    "rule_id": "IAC-SEC-001",
+    "title": "Open Port 22",
+    "severity": "high",
+    "file_path": "main.tf",
+    "line_start": 4
+  }
+]

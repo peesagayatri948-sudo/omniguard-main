@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  dashboard:
+    build:
+      context: ./omniguard
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=https://krnpfunshzycavskrtod.supabase.co
+        - VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtybnBmdW5zaHp5Y2F2c2tydG9kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNTU3NjcsImV4cCI6MjA5ODgzMTc2N30.gKqfOLzszLeP3rzlQ1MNjVqSWcNAtbP5kdeR43sHBVE
+    container_name: omniguard-dashboard-service
+    ports:
+      - "3000:80"
+    restart: always
+    environment:
+      - VITE_SUPABASE_URL=https://krnpfunshzycavskrtod.supabase.co
+      - VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtybnBmdW5zaHp5Y2F2c2tydG9kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNTU3NjcsImV4cCI6MjA5ODgzMTc2N30.gKqfOLzszLeP3rzlQ1MNjVqSWcNAtbP5kdeR43sHBVE
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
