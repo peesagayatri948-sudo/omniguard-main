@@ -1,8 +1,8 @@
 {
   "name": "omniguard",
   "displayName": "OmniGuard Security",
-  "description": "AI-powered application security scanner — inline diagnostics, secret detection, SAST, and AI remediation",
-  "version": "2.1.1",
+  "description": "AI-powered application security scanner — semantic scanning, taint analysis, inline diagnostics, and AI remediation",
+  "version": "2.2.5",
   "publisher": "omniguard",
   "icon": "media/icon.png",
   "repository": {
@@ -11,10 +11,8 @@
   },
   "engines": { "vscode": "^1.80.0" },
   "categories": ["Linters", "Other"],
-  "keywords": ["security", "secrets", "sast", "appsec", "omniguard"],
-  "activationEvents": [
-    "onStartupFinished"
-  ],
+  "keywords": ["security", "secrets", "sast", "appsec", "semantic", "taint-analysis", "compliance", "omniguard"],
+  "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -24,12 +22,18 @@
     },
     "views": {
       "omniguard": [
-        { "id": "omniguardFindings", "name": "Security Findings" }
+        { "id": "omniguardFindings", "name": "Security Findings" },
+        { "id": "omniguardSemantic", "name": "Semantic Analysis" },
+        { "id": "omniguardGraph", "name": "Architecture Graph" }
       ]
     },
     "commands": [
       { "command": "omniguard.scanFile",          "title": "OmniGuard: Scan Current File" },
       { "command": "omniguard.scanWorkspace",     "title": "OmniGuard: Scan Workspace" },
+      { "command": "omniguard.semanticScan",      "title": "OmniGuard: Semantic Scan (AI-Powered)" },
+      { "command": "omniguard.showGraph",         "title": "OmniGuard: Show Architecture Graph" },
+      { "command": "omniguard.auditReport",       "title": "OmniGuard: Generate Compliance Audit" },
+      { "command": "omniguard.explain",           "title": "OmniGuard: AI Explain Finding" },
       { "command": "omniguard.configure",         "title": "OmniGuard: Configure" },
       { "command": "omniguard.clearDiagnostics",  "title": "OmniGuard: Clear Diagnostics" },
       { "command": "omniguard.showFindings",      "title": "OmniGuard: Show Findings Panel" },
@@ -56,8 +60,13 @@
         },
         "omniguard.enableOnType": {
           "type": "boolean",
-          "default": false,
-          "description": "Scan files while typing (debounced, may be slow)"
+          "default": true,
+          "description": "Scan files while typing (debounced real-time)"
+        },
+        "omniguard.semanticScan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered semantic scanning (taint tracking, data flow analysis)"
         },
         "omniguard.failOnSeverity": {
           "type": "string",
@@ -67,13 +76,18 @@
         },
         "omniguard.scanDelay": {
           "type": "number",
-          "default": 1000,
-          "description": "Debounce delay in ms for on-type scanning"
+          "default": 500,
+          "description": "Debounce delay in ms for on-type real-time scanning"
         },
         "omniguard.excludePatterns": {
           "type": "array",
           "default": ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**"],
           "description": "Glob patterns to exclude from scanning"
+        },
+        "omniguard.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to omniguard-enterprise-cli binary (auto-detected if empty)"
         }
       }
     },
@@ -83,11 +97,25 @@
           "command": "omniguard.scanFile",
           "group": "omniguard",
           "when": "editorTextFocus"
+        },
+        {
+          "command": "omniguard.semanticScan",
+          "group": "omniguard",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "omniguard.explain",
+          "group": "omniguard",
+          "when": "editorTextFocus && omniguard.hasFindings"
         }
       ],
       "explorer/context": [
         {
           "command": "omniguard.scanWorkspace",
+          "group": "omniguard"
+        },
+        {
+          "command": "omniguard.auditReport",
           "group": "omniguard"
         }
       ]
@@ -101,6 +129,9 @@
     "lint": "eslint src --ext ts",
     "package": "vsce package --no-yarn",
     "publish-ext": "vsce publish --no-yarn"
+  },
+  "dependencies": {
+    "omniguard-enterprise-cli": "^2.2.5"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

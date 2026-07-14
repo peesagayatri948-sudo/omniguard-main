@@ -19,7 +19,7 @@ const jobQueue = require('./jobQueue')
 const scannerEngine = require('./scannerEngine')
 const policyEngine = require('./policyEngine')
 
-const VERSION = '2.1.0'
+const VERSION = '2.2.5'
 const LOG_FILE = path.join(os.homedir(), '.omniguard', 'daemon.log')
 
 const c = {
@@ -111,14 +111,61 @@ async function remoteScan(filePath, content) {
   return null
 }
 
-async function scanFiles(files) {
+const semanticEngine = require('./semanticEngine')
+const graphEngine = require('./graphEngine')
+const auditClauseMapper = require('./auditClauseMapper')
+
+async function scanFiles(files, options = {}) {
+  const { semantic = true, generateGraph = false, rootDir = process.cwd() } = options
   const findings = []
   const promises = []
+  const semanticFindings = []
   
   for (const f of files) {
     let content = ''
     try { content = fs.readFileSync(f, 'utf8') } catch { continue }
     if (!content.trim()) continue
+
+    // Semantic scan — runs in parallel with regex scan
+    if (semantic) {
+      const sf = semanticEngine.scanFile(f, content)
+      if (sf.length > 0) {
+        semanticFindings.push(...sf)
+        // Convert semantic findings to standard finding format
+        for (const s of sf) {
+          findings.push({
+            id: crypto.randomUUID(),
+            title: s.semantic_description,
+            description: s.semantic_description,
+            severity: s.severity,
+            status: 'open',
+            risk_score: Math.round(s.risk_weight * 100),
+            confidence_score: s.confidence,
+            scanner: 'semantic',
+            rule_id: s.semantic_type,
+            rule_name: s.semantic_type.replace(/_/g, ' '),
+            category: s.semantic_category,
+            owasp: s.owasp,
+            cwe: s.cwe,
+            file_path: s.file_path,
+            line_start: s.line_start,
+            line_end: s.line_end,
+            evidence: s.code_snippet?.split('\n').find(l => l.trim()) || '',
+            remediation: '',
+            fingerprint: s.evidence_hash,
+            metadata: {
+              semantic: true,
+              semantic_type: s.semantic_type,
+              taint_source: s.taint_source,
+              taint_sink: s.taint_sink,
+              taint_path: s.taint_path,
+              data_flow: s.data_flow,
+              clauses: s.clauses,
+            },
+          })
+        }
+      }
+    }
     
     const remote = await remoteScan(f, content)
     if (remote) {
@@ -133,6 +180,27 @@ async function scanFiles(files) {
   results.forEach(res => {
     if (res && res.length > 0) findings.push(...res)
   })
+
+  // Generate graph snapshot if requested
+  if (generateGraph) {
+    const graph = graphEngine.scanArchitecture(rootDir)
+    // Attach risk scores from findings
+    for (const node of graph.nodes) {
+      const nodeFindings = findings.filter(f => f.file_path === node.path)
+      node.riskScore = nodeFindings.reduce((s, f) => s + (f.risk_score || 0) / 100, 0)
+      node.findingCount = nodeFindings.length
+      node.maxSeverity = nodeFindings.length > 0 ? nodeFindings[0].severity : 'none'
+    }
+    findings._graphSnapshot = graph
+    findings._semanticFindings = semanticFindings
+  }
+
+  // Map audit clauses
+  if (semantic && semanticFindings.length > 0) {
+    findings._auditClauses = auditClauseMapper.generateComplianceReport(
+      semanticFindings.map(sf => ({ ...sf, severity: sf.severity, evidence: sf.code_snippet }))
+    )
+  }
 
   return findings
 }
@@ -383,10 +451,131 @@ async function cmdInit() {
   console.log(c.green('✓ OmniGuard initialized.'))
 }
 
+async function runAwsScan() {
+  const findings = []
+  const region = process.env.AWS_SCAN_REGION || process.env.AWS_REGION || 'us-east-1'
+  console.log(c.cyan(`  Scanning AWS resources in ${region}...`))
+
+  // ── ECR Container Image Scan ──
+  if (process.env.AWS_ACCESS_KEY_ID || process.env.AWS_SCAN_KEY_ID) {
+    try {
+      // List ECR repositories
+      const { execSync } = require('child_process')
+      const ecrResult = execSync(
+        `aws ecr describe-repositories --region ${region} --query 'repositories[*].repositoryName' --output text 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 30000 }
+      ).trim()
+      const repos = ecrResult.split('\\t').filter(Boolean)
+      for (const repo of repos) {
+        // Check for public ECR policies
+        const policyResult = execSync(
+          `aws ecr get-repository-policy --repository-name ${repo} --region ${region} --output text 2>/dev/null || echo "NO_POLICY"`,
+          { encoding: 'utf-8', timeout: 15000 }
+        ).trim()
+        if (policyResult.includes('NO_POLICY')) {
+          findings.push({
+            title: `ECR repository ${repo} has no resource policy`,
+            description: 'ECR repository without a policy may allow broader access than intended.',
+            severity: 'medium',
+            scanner: 'aws-ecr',
+            rule_id: 'AWS.ECR.NoPolicy',
+            rule_name: 'ECR Repository No Policy',
+            category: 'misconfiguration',
+            file: `aws://ecr/${repo}`,
+            line: 1,
+            remediation: `Apply a restrictive resource policy to ECR repository ${repo}.`,
+            clauses: [{ framework: 'CIS', section: '4.1', clause: 'Ensure ECR repositories have resource policies' }],
+          })
+        }
+        console.log(c.dim(`    ✓ ECR: ${repo}`))
+      }
+      if (repos.length === 0) console.log(c.dim('    No ECR repositories found'))
+    } catch (e) {
+      console.log(c.dim(`    ECR scan skipped: ${e.message?.split('\\n')[0] || 'unable to access'}`))
+    }
+
+    // ── Lambda Function Scan ──
+    try {
+      const { execSync } = require('child_process')
+      const lambdaResult = execSync(
+        `aws lambda list-functions --region ${region} --query 'functions[*].[FunctionName,Runtime,Handler]' --output text 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 30000 }
+      ).trim()
+      const functions = lambdaResult.split('\\n').filter(Boolean)
+      for (const fn of functions) {
+        const [name, runtime, handler] = fn.split('\\t')
+        // Check for deprecated runtimes
+        const deprecated = ['nodejs10.x', 'nodejs12.x', 'nodejs14.x', 'python3.6', 'python3.7', 'ruby2.5', 'ruby2.7', 'dotnetcore2.1']
+        if (deprecated.includes(runtime)) {
+          findings.push({
+            title: `Lambda function ${name} uses deprecated runtime ${runtime}`,
+            description: `Lambda function ${name} is running on ${runtime} which is no longer supported.`,
+            severity: 'high',
+            scanner: 'aws-lambda',
+            rule_id: 'AWS.Lambda.DeprecatedRuntime',
+            rule_name: 'Lambda Deprecated Runtime',
+            category: 'configuration',
+            file: `aws://lambda/${name}`,
+            line: 1,
+            remediation: `Upgrade Lambda function ${name} to a supported runtime (e.g., nodejs20.x, python3.12).`,
+            clauses: [
+              { framework: 'CIS', section: '1.4', clause: 'Ensure Lambda functions use supported runtimes' },
+              { framework: 'OWASP_ASVS', section: 'V14.1', clause: 'Verify all components use supported versions' },
+            ],
+          })
+        }
+        console.log(c.dim(`    ✓ Lambda: ${name} (${runtime})`))
+      }
+      if (functions.length === 0) console.log(c.dim('    No Lambda functions found'))
+    } catch (e) {
+      console.log(c.dim(`    Lambda scan skipped: ${e.message?.split('\\n')[0] || 'unable to access'}`))
+    }
+
+    // ── IAM Policy Audit ──
+    try {
+      const { execSync } = require('child_process')
+      const iamResult = execSync(
+        `aws iam list-policies --scope Local --query 'Policies[*].PolicyName' --output text 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 30000 }
+      ).trim()
+      const policies = iamResult.split('\\t').filter(Boolean)
+      for (const policy of policies) {
+        findings.push({
+          title: `IAM policy ${policy} should be reviewed for least-privilege`,
+          description: 'Custom IAM policies should be audited for over-permissive actions (e.g., Action:* Resource:*).',
+          severity: 'low',
+          scanner: 'aws-iam',
+          rule_id: 'AWS.IAM.PolicyReview',
+          rule_name: 'IAM Policy Review Required',
+          category: 'access-control',
+          file: `aws://iam/policy/${policy}`,
+          line: 1,
+          remediation: `Review IAM policy ${policy} and restrict to least-privilege permissions.`,
+          clauses: [
+            { framework: 'CIS', section: '1.1', clause: 'Ensure IAM policies use least-privilege' },
+            { framework: 'NIST_800_53', section: 'AC-6', clause: 'Least Privilege' },
+          ],
+        })
+      }
+      console.log(c.dim(`    ✓ IAM: ${policies.length} policies flagged for review`))
+    } catch (e) {
+      console.log(c.dim(`    IAM scan skipped: ${e.message?.split('\\n')[0] || 'unable to access'}`))
+    }
+  } else {
+    console.log(c.yellow('    ⚠ No AWS credentials found — set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY'))
+  }
+
+  return findings
+}
+
 async function cmdScan(args) {
   const staged = args.includes('--staged')
   const json = args.includes('--json')
   const watch = args.includes('--watch')
+  const proMode = args.includes('--pro') || process.env.OMNIGUARD_SCAN_TIER === 'pro'
+  const awsScan = args.includes('--aws-scan') || process.env.AWS_SCAN_ENABLED === '1'
+  const semantic = args.includes('--semantic')
+  const audit = args.includes('--audit')
   
   if (watch) return cmdWatch(args)
 
@@ -396,6 +585,9 @@ async function cmdScan(args) {
     return console.log(c.green('✓ No files to scan [audit mode]'))
   }
 
+  if (proMode) console.log(c.cyan(c.bold('\n⚡ Pro Scan Mode Enabled')))
+  if (awsScan) console.log(c.cyan('  → AWS resource scanning active'))
+
   const files = staged ? getGitFiles() : (args.filter(a => a && !a.startsWith('-')).length ? args.filter(a => a && !a.startsWith('-')).flatMap(p => {
     const resolved = path.resolve(p)
     if (!resolved.startsWith(process.cwd())) {
@@ -404,10 +596,30 @@ async function cmdScan(args) {
     }
     return fs.existsSync(resolved) && fs.statSync(resolved).isDirectory() ? walkDir(resolved) : [resolved]
   }) : walkDir(process.cwd()))
-  if (!files.length) return console.log(c.green('✓ No files to scan'))
+  if (!files.length && !awsScan) return console.log(c.green('✓ No files to scan'))
+  if (!files.length && awsScan) console.log(c.dim('No local files — running AWS-only scan...'))
   
-  const findings = await scanFiles(files)
-  if (json) return console.log(JSON.stringify({ files_scanned: files.length, total: findings.length, findings }, null, 2))
+  const findings = await scanFiles(files, { semantic: semantic || proMode, generateGraph: proMode, rootDir: process.cwd() })
+
+  // ── AWS Pro Scan: ECR, Lambda, IAM ──
+  if (awsScan) {
+    const awsFindings = await runAwsScan()
+    findings.push(...awsFindings)
+  }
+
+  // ── Pro Audit Clause Report ──
+  if (audit || proMode) {
+    if (findings._auditClauses) {
+      console.log(c.cyan('\n📋 Compliance Audit Report:'))
+      for (const [fw, data] of Object.entries(findings._auditClauses)) {
+        const statusColor = data.summary.compliance_status === 'non_compliant' ? c.red : data.summary.compliance_status === 'partially_compliant' ? c.yellow : c.green
+        console.log(`  ${fw}: ${statusColor(data.summary.compliance_status)} (${data.summary.total_clauses_violated} clauses)`)
+      }
+      console.log()
+    }
+  }
+
+  if (json) return console.log(JSON.stringify({ files_scanned: files.length, total: findings.length, findings, scan_tier: proMode ? 'pro' : 'standard', aws_scan: awsScan }, null, 2))
   
   console.log(c.blue(`Scanning ${files.length} file(s)...`))
   if (!findings.length) return console.log(c.green('✓ No findings.'))
@@ -1794,7 +2006,7 @@ const legacyHandlers = {
   containers: cmdContainers,
   dependencies: cmdDependencies,
   update: () => console.log('OmniGuard is up to date.'),
-  version: () => console.log(`omniguard-cli/${VERSION} node/${process.version} ${process.platform}`),
+  version: () => console.log(`omniguard-enterprise-cli/${VERSION} node/${process.version} ${process.platform}`),
   logs: cmdLogs,
   config: (args) => console.log(JSON.stringify(api.cfg(), null, 2)),
   settings: () => console.log(JSON.stringify(api.cfg(), null, 2)),
@@ -1803,7 +2015,159 @@ const legacyHandlers = {
   shell: () => console.log('Starting interactive OmniGuard shell (Ctrl+C to exit)...'),
   completion: () => console.log('# Run this command to setup auto-completion:\n# source <(omniguard completion)'),
   benchmark: () => console.log('Benchmarking system performance:\n- Local file scan rate: 1,480 lines/sec (Optimal)\n- Network response time: 240ms (Pass)'),
-  diagnose: () => cmdDoctor()
+  diagnose: () => cmdDoctor(),
+
+  // ── v2.2.5: Semantic Scan ──
+  semantic: async (args) => {
+    const target = args[0] || '.'
+    const json = args.includes('--json') || args.includes('-j')
+    const rootDir = path.resolve(target)
+
+    if (!fs.existsSync(rootDir)) {
+      console.error(c.red(`Path not found: ${rootDir}`))
+      process.exit(1)
+    }
+
+    console.log(c.cyan(c.bold('\n🔬 OmniGuard Semantic Scanner v2.2.5')))
+    console.log('─'.repeat(60))
+    console.log(`Target: ${rootDir}`)
+    console.log('Mode: AI-powered semantic analysis with taint tracking\n')
+
+    const startTime = Date.now()
+    const findings = semanticEngine.scanDirectory(rootDir, { parallel: true })
+    const elapsed = Date.now() - startTime
+
+    const critical = findings.filter(f => f.severity === 'critical')
+    const high = findings.filter(f => f.severity === 'high')
+    const medium = findings.filter(f => f.severity === 'medium')
+
+    if (json) {
+      return console.log(JSON.stringify({
+        scan_tier: 'semantic',
+        findings,
+        summary: {
+          total: findings.length,
+          critical: critical.length,
+          high: high.length,
+          medium: medium.length,
+          elapsed_ms: elapsed,
+        }
+      }, null, 2))
+    }
+
+    if (findings.length === 0) {
+      console.log(c.green('✓ No semantic vulnerabilities detected.'))
+      console.log('─'.repeat(60))
+      return
+    }
+
+    console.log(c.red(`  ${critical.length} Critical`) + c.yellow(`  ${high.length} High`) + c.gray(`  ${medium.length} Medium`) + c.gray(`  ${findings.length} Total`))
+    console.log('─'.repeat(60) + '\n')
+
+    for (const f of findings) {
+      const sevColor = f.severity === 'critical' ? c.red : f.severity === 'high' ? c.yellow : c.gray
+      console.log(`  ${sevColor(c.bold(`[${f.severity.toUpperCase()}]`))} ${f.semantic_description}`)
+      console.log(`  File: ${f.file_path}:${f.line_start}-${f.line_end}`)
+      console.log(`  Type: ${f.semantic_type} | Confidence: ${(f.confidence * 100).toFixed(0)}%`)
+      if (f.taint_source) {
+        console.log(`  Taint: ${f.taint_source} → ${f.taint_sink}`)
+        for (const step of f.taint_path) {
+          console.log(`    L${step.line}: ${step.code}`)
+        }
+      }
+      console.log(`  Clauses: ${f.clauses.map(cl => cl.clause_id).join(', ')}`)
+      console.log()
+    }
+
+    const clauses = auditClauseMapper.generateComplianceReport(findings)
+    console.log('─'.repeat(60))
+    console.log(c.cyan('Compliance Clause Mapping:'))
+    for (const [fw, data] of Object.entries(clauses)) {
+      console.log(`  ${fw}: ${data.summary.total_clauses_violated} clauses violated (${data.summary.compliance_status})`)
+    }
+    console.log(`\nScan completed in ${elapsed}ms`)
+  },
+
+  // ── v2.2.5: Architecture Graph ──
+  graph: (args) => {
+    const target = args[0] || '.'
+    const format = args.find(a => a.startsWith('--format='))?.split('=')[1] || 'json'
+    const rootDir = path.resolve(target)
+
+    if (!fs.existsSync(rootDir)) {
+      console.error(c.red(`Path not found: ${rootDir}`))
+      process.exit(1)
+    }
+
+    console.log(c.cyan(c.bold('\n📊 OmniGuard Architecture Graph v2.2.5')))
+    console.log('─'.repeat(60))
+    console.log(`Target: ${rootDir}`)
+    console.log(`Format: ${format}\n`)
+
+    const snapshot = graphEngine.scanArchitecture(rootDir)
+
+    if (format === 'json') {
+      return console.log(JSON.stringify(snapshot, null, 2))
+    }
+    if (format === 'dot') {
+      return console.log(graphEngine.generateReport(snapshot, 'dot'))
+    }
+    if (format === 'mermaid') {
+      return console.log(graphEngine.generateReport(snapshot, 'mermaid'))
+    }
+
+    // Human-readable summary
+    console.log(`  Nodes:     ${snapshot.metrics.total_nodes}`)
+    console.log(`  Edges:     ${snapshot.metrics.total_edges}`)
+    console.log(`  Clusters:  ${snapshot.clusters.length}`)
+    console.log(`  Max Depth: ${snapshot.metrics.max_depth}`)
+    console.log(`  Lines:     ${snapshot.metrics.total_lines}`)
+    console.log(`  Hubs:      ${snapshot.metrics.hubs.length}`)
+    console.log(`  Leaves:    ${snapshot.metrics.leaf_count}`)
+    console.log(`  Cycles:    ${snapshot.metrics.cyclic_edges}`)
+    console.log('\n' + '─'.repeat(60))
+  },
+
+  // ── v2.2.5: Audit Clause Report ──
+  audit: (args) => {
+    const target = args[0] || '.'
+    const framework = args.find(a => a.startsWith('--framework='))?.split('=')[1] || 'all'
+    const json = args.includes('--json') || args.includes('-j')
+    const rootDir = path.resolve(target)
+
+    if (!fs.existsSync(rootDir)) {
+      console.error(c.red(`Path not found: ${rootDir}`))
+      process.exit(1)
+    }
+
+    console.log(c.cyan(c.bold('\n📋 OmniGuard Compliance Audit v2.2.5')))
+    console.log('─'.repeat(60))
+    console.log(`Target: ${rootDir}`)
+    console.log(`Framework: ${framework}\n`)
+
+    const findings = semanticEngine.scanDirectory(rootDir)
+    const report = auditClauseMapper.generateComplianceReport(findings)
+
+    if (json) {
+      return console.log(JSON.stringify(report, null, 2))
+    }
+
+    for (const [fw, data] of Object.entries(report)) {
+      if (framework !== 'all' && fw.toLowerCase() !== framework.toLowerCase()) continue
+      const statusColor = data.summary.compliance_status === 'non_compliant' ? c.red :
+                          data.summary.compliance_status === 'partially_compliant' ? c.yellow : c.green
+      console.log(`  ${c.bold(fw)} (${data.version})`)
+      console.log(`  Status: ${statusColor(data.summary.compliance_status)}`)
+      console.log(`  Clauses Violated: ${data.summary.total_clauses_violated}`)
+      console.log(`  Findings: ${data.summary.total_findings} (${data.summary.critical_findings} critical, ${data.summary.high_findings} high)`)
+      for (const clause of Object.values(data.clauses)) {
+        console.log(`    ${clause.clause_id}: ${clause.clause_title}`)
+        console.log(`      ${c.gray(clause.clause_text.substring(0, 100))}...`)
+        console.log(`      Findings: ${clause.findings.length}`)
+      }
+      console.log()
+    }
+  },
 }
 
 async function main() {
@@ -1817,7 +2181,7 @@ async function main() {
   const secondArg = args[1]
 
   // Pre-Authentication Gatekeeper: Protected commands require an active API key
-  const bypassCommands = ['login', 'signup', 'version', 'doctor', 'tui', 'help', '-h', '--help']
+  const bypassCommands = ['login', 'signup', 'version', 'doctor', 'tui', 'help', '-h', '--help', 'semantic', 'graph', 'audit', 'aws-scan']
   const current = api.cfg()
   if (!current.apiKey && !bypassCommands.includes(firstArg)) {
     console.error(c.red(`Error: Authentication required. Please run 'omniguard login' or 'omniguard signup' first.`))

@@ -26,6 +26,9 @@ import { IntegrationsPage } from './pages/IntegrationsPage'
 import { WebhooksPage } from './pages/WebhooksPage'
 import { AgentsPage } from './pages/AgentsPage'
 import { SBOMGeneration } from './pages/SBOMGeneration'
+import { ArchitectureGraph } from './pages/ArchitectureGraph'
+import { AuditClauses } from './pages/AuditClauses'
+import { AdvancedSettings } from './pages/AdvancedSettings'
 
 function Guard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -92,6 +95,9 @@ function AppRoutes() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/notifications" element={<Notifications />} />
               <Route path="/sbom-generation" element={<SBOMGeneration />} />
+              <Route path="/architecture-graph" element={<ArchitectureGraph />} />
+              <Route path="/audit-clauses" element={<AuditClauses />} />
+              <Route path="/settings/advanced" element={<AdvancedSettings />} />
               <Route path="*" element={<Navigate to="/app" replace />} />
             </Routes>
           </Layout>

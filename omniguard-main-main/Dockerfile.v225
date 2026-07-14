@@ -1,0 +1,62 @@
+# ──────────────────────────────────────────────────────────────
+# OmniGuard v2.2.5 — Multi-Stage Production Docker Build
+# Builds: CLI (omniguard-enterprise-cli) + Dashboard + Daemon
+# ──────────────────────────────────────────────────────────────
+
+# ── Stage 1: Build CLI ──
+FROM node:20-alpine AS cli-builder
+
+WORKDIR /app/cli
+COPY cli/package.json cli/package-lock.json ./
+RUN npm ci --production=false
+
+COPY cli/ ./
+RUN npm run prepublishOnly 2>/dev/null || true
+RUN npm link
+
+# ── Stage 2: Build Dashboard ──
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /app/dashboard
+COPY omniguard/package.json omniguard/package-lock.json ./
+RUN npm ci
+
+COPY omniguard/ ./
+
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+ENV VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+ENV VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+
+RUN npm run build
+
+# ── Stage 3: Production ──
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache git docker-cli
+
+# Copy CLI from builder
+COPY --from=cli-builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=cli-builder /usr/local/bin/omniguard /usr/local/bin/omniguard
+COPY --from=cli-builder /app/cli /app/cli
+
+# Copy dashboard build
+COPY --from=dashboard-builder /app/dashboard/dist /app/dashboard/dist
+COPY --from=dashboard-builder /app/dashboard/package.json /app/dashboard/package.json
+COPY --from=dashboard-builder /app/dashboard/node_modules /app/dashboard/node_modules
+
+# Expose dashboard + daemon ports
+EXPOSE 5173 5175
+
+ENV OMNIGUARD_DAEMON_PORT=5175
+ENV NODE_ENV=production
+
+# Entrypoint: daemon in background, dashboard preview in foreground
+RUN echo '#!/bin/sh' > /app/entrypoint.sh && \
+    echo 'node /app/cli/src/daemon.js &' >> /app/entrypoint.sh && \
+    echo 'cd /app/dashboard && npx vite preview --host 0.0.0.0 --port 5173' >> /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]

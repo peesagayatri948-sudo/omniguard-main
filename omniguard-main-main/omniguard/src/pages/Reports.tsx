@@ -83,6 +83,36 @@ export function Reports() {
     `- MTTR: ${metrics.mttr}h`,
   ].join('\n'), 'text/markdown')
 
+  const exportSarif = () => {
+    const sarif = {
+      $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+      version: '2.1.0',
+      runs: [{
+        tool: { driver: { name: 'OmniGuard', version: '2.2.5', informationUri: 'https://omniguard.io' } },
+        results: findings.map(f => ({
+          ruleId: f.rule_id || f.scanner || 'omniguard',
+          level: f.severity === 'critical' ? 'error' : f.severity === 'high' ? 'error' : f.severity === 'medium' ? 'warning' : 'note',
+          message: { text: f.title || f.description || 'Finding detected' },
+          locations: [{ physicalLocation: { artifactLocation: { uri: f.file_path || f.file || 'unknown' }, region: { startLine: f.line || 1 } } }],
+          partialFingerprints: { primaryLocationLineHash: `${f.id}` },
+          properties: { severity: f.severity, category: f.category, status: f.status, remediation: f.remediation },
+        })),
+      }],
+    }
+    download(`omniguard-report-${currentOrganizationId || 'org'}.sarif`, JSON.stringify(sarif, null, 2), 'application/json')
+  }
+
+  const exportHtml = () => {
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>OmniGuard Report</title><style>body{font-family:system-ui,sans-serif;max-width:960px;margin:40px auto;padding:0 20px;color:#1e293b}h1{border-bottom:2px solid #3b82f6;padding-bottom:10px}h2{color:#3b82f6;margin-top:32px}.metric{display:inline-block;width:180px;padding:16px;margin:8px;border:1px solid #e2e8f0;border-radius:8px;text-align:center}.metric .value{font-size:28px;font-weight:bold;color:#3b82f6}.metric .label{font-size:12px;color:#64748b;text-transform:uppercase}table{width:100%;border-collapse:collapse;margin:16px 0}th{background:#f1f5f9;padding:8px;text-align:left;font-size:12px;text-transform:uppercase}td{padding:8px;border-bottom:1px solid #e2e8f0}.sev-critical{color:#dc2626;font-weight:bold}.sev-high{color:#ea580c;font-weight:bold}.sev-medium{color:#ca8a04}.sev-low{color:#64748b}.timestamp{color:#94a3b8;font-size:12px}</style></head><body>
+    <h1>OmniGuard Security Report</h1>
+    <p class="timestamp">Generated: ${new Date().toISOString()}</p>
+    <div><div class="metric"><div class="value">${metrics.open.length}</div><div class="label">Open Findings</div></div><div class="metric"><div class="value">${metrics.critical}</div><div class="label">Critical</div></div><div class="metric"><div class="value">${metrics.high}</div><div class="label">High</div></div><div class="metric"><div class="value">${metrics.scanCount}</div><div class="label">Scans</div></div><div class="metric"><div class="value">${metrics.mttr}h</div><div class="label">MTTR</div></div></div>
+    <h2>Findings</h2><table><thead><tr><th>Severity</th><th>Title</th><th>File</th><th>Status</th><th>Created</th></tr></thead><tbody>${findings.map(f => `<tr><td class="sev-${f.severity}">${f.severity}</td><td>${f.title || ''}</td><td>${f.file_path || f.file || ''}</td><td>${f.status}</td><td>${new Date(f.created_at).toLocaleDateString()}</td></tr>`).join('')}</tbody></table>
+    <h2>Recent Scans</h2><table><thead><tr><th>Status</th><th>Repository</th><th>Findings</th><th>Duration</th><th>Date</th></tr></thead><tbody>${scans.map(s => `<tr><td>${s.status}</td><td>${s.repository_id || ''}</td><td>${s.findings_count || 0}</td><td>${s.duration_seconds || 0}s</td><td>${new Date(s.created_at).toLocaleDateString()}</td></tr>`).join('')}</tbody></table>
+    </body></html>`
+    download(`omniguard-report-${currentOrganizationId || 'org'}.html`, html, 'text/html')
+  }
+
   return (
     <div className="p-8 space-y-6 animate-fade-in">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -94,6 +124,8 @@ export function Reports() {
           <button onClick={load} className="btn-secondary"><RefreshCw className="w-4 h-4" />Refresh</button>
           <button onClick={exportJson} className="btn-secondary"><FileDown className="w-4 h-4" />JSON</button>
           <button onClick={exportCsv} className="btn-secondary"><Download className="w-4 h-4" />CSV</button>
+          <button onClick={exportSarif} className="btn-secondary"><FileDown className="w-4 h-4" />SARIF</button>
+          <button onClick={exportHtml} className="btn-secondary"><FileDown className="w-4 h-4" />HTML</button>
           <button onClick={exportMarkdown} className="btn-primary"><FileText className="w-4 h-4" />Markdown</button>
         </div>
       </div>

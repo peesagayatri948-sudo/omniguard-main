@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useNotifications } from '../hooks/useRepositories'
-import { Shield, LayoutDashboard, GitBranch, TriangleAlert, Play, ClipboardList, ShieldCheck, Users, FileText, Settings, LogOut, Bell, X, ChevronDown, ChevronRight, Search, Building2, Projector as Projects, Server, Lock, Key, Globe, Activity, ChartBar as BarChart3, Cloud, Code, Package, Layers, Brain, BookOpen, CreditCard, UserCog, Puzzle, Zap, ExternalLink, Command, Menu, Moon, Sun, Circle as HelpCircle, Briefcase, Target, CircleAlert as AlertCircle, TrendingUp, BadgeCheck } from 'lucide-react'
+import { Shield, LayoutDashboard, GitBranch, TriangleAlert, Play, ClipboardList, ShieldCheck, Users, FileText, Settings, LogOut, Bell, X, ChevronDown, ChevronRight, Search, Building2, Projector as Projects, Server, Lock, Key, Globe, Activity, ChartBar as BarChart3, Cloud, Code, Package, Layers, Brain, BookOpen, CreditCard, UserCog, Puzzle, Zap, ExternalLink, Command, Menu, Moon, Sun, Circle as HelpCircle, Briefcase, Target, CircleAlert as AlertCircle, TrendingUp, BadgeCheck, Network, ScrollText, SlidersHorizontal } from 'lucide-react'
 
 interface NavGroup {
   label: string
@@ -46,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/scans', icon: Play, label: 'Scans' },
       { to: '/policies', icon: ClipboardList, label: 'Policies' },
       { to: '/compliance', icon: ShieldCheck, label: 'Compliance' },
+      { to: '/audit-clauses', icon: ScrollText, label: 'Audit Clauses' },
       { to: '/risk-analysis', icon: TrendingUp, label: 'Risk Analysis' },
     ]
   },
@@ -82,6 +83,13 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/notifications', icon: Bell, label: 'Notifications' },
       { to: '/billing', icon: CreditCard, label: 'Billing' },
       { to: '/settings', icon: Settings, label: 'Settings' },
+      { to: '/settings/advanced', icon: SlidersHorizontal, label: 'Advanced Settings' },
+    ]
+  },
+  {
+    label: 'Architecture',
+    items: [
+      { to: '/architecture-graph', icon: Network, label: 'Architecture Graph' },
     ]
   },
 ]
