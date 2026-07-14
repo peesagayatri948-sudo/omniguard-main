@@ -42,7 +42,7 @@ export function Auth({ initialMode }: { initialMode?: Mode }) {
       return setError('First name is required.')
     }
 
-    const { error: err } = await signUp(form.email, form.password, form.firstName, form.lastName)
+    const { data: signUpData, error: err } = await signUp(form.email, form.password, form.firstName, form.lastName)
     if (err) {
       setLoading(false)
       return setError(err)
@@ -55,10 +55,10 @@ export function Auth({ initialMode }: { initialMode?: Mode }) {
       plan: 'enterprise',
       settings: {},
       ai_config: {},
+      created_by: signUpData?.user?.id,
     }).select().single()
-    if (org) {
-      const { data: { user } } = await supabaseAuth.getUser()
-      if (user) await supabase.from('organization_members').insert({ organization_id: org.id, user_id: user.id, role: 'owner', status: 'active' })
+    if (org && signUpData?.user?.id) {
+      await supabase.from('organization_members').insert({ organization_id: org.id, user_id: signUpData.user.id, role: 'owner', status: 'active' })
     }
 
     const { error: si } = await signIn(form.email, form.password)

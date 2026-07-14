@@ -1,23 +1,49 @@
-version: '3.8'
-
 services:
   dashboard:
     build:
       context: ./omniguard
       dockerfile: Dockerfile
       args:
-        - VITE_SUPABASE_URL=https://krnpfunshzycavskrtod.supabase.co
-        - VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtybnBmdW5zaHp5Y2F2c2tydG9kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNTU3NjcsImV4cCI6MjA5ODgzMTc2N30.gKqfOLzszLeP3rzlQ1MNjVqSWcNAtbP5kdeR43sHBVE
-    container_name: omniguard-dashboard-service
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+    container_name: omniguard-dashboard
     ports:
       - "3000:80"
     restart: always
     environment:
-      - VITE_SUPABASE_URL=https://krnpfunshzycavskrtod.supabase.co
-      - VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtybnBmdW5zaHp5Y2F2c2tydG9kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNTU3NjcsImV4cCI6MjA5ODgzMTc2N30.gKqfOLzszLeP3rzlQ1MNjVqSWcNAtbP5kdeR43sHBVE
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
       interval: 30s
       timeout: 3s
       retries: 3
       start_period: 5s
+
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+    container_name: omniguard-daemon
+    ports:
+      - "5175:5175"
+    restart: always
+    environment:
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - SUPABASE_URL=${VITE_SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - OMNIGUARD_DAEMON_PORT=5175
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5175/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

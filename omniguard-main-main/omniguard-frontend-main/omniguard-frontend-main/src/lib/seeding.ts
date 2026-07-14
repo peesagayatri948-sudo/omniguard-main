@@ -17,7 +17,6 @@ export async function seedDatabaseIfEmpty(supabase: SupabaseClient, userId: stri
         email,
         first_name: email.split('@')[0],
         last_name: 'User',
-        preferences: {},
       });
     }
 
@@ -83,12 +82,10 @@ export async function seedDatabaseIfEmpty(supabase: SupabaseClient, userId: stri
           owner: 'experian',
           name: 'trader_bot',
           full_name: 'experian/trader_bot',
-          description: 'High-frequency trading bot with automated strategy execution.',
           default_branch: 'main',
           visibility: 'private',
           language: 'Python',
-          risk_score: 8.5,
-          is_active: true,
+          risk_score: 85,
           created_by: userId,
         })
         .select()
@@ -154,8 +151,7 @@ export async function seedDatabaseIfEmpty(supabase: SupabaseClient, userId: stri
           line_start: 201,
           rule_id: 'SAST-DESER-001',
           rule_name: 'Unsafe Pickle Deserialization',
-          owasp: ['A08:2021-Software and Data Integrity Failures'],
-          mitre: ['T1190'],
+          owasp: 'A08:2021-Software and Data Integrity Failures',
           remediation: 'Use json.loads() or safeyaml to deserialize incoming stream payloads.',
           status: 'open',
         },
@@ -173,7 +169,6 @@ export async function seedDatabaseIfEmpty(supabase: SupabaseClient, userId: stri
           line_start: 45,
           rule_id: 'IAC-SG-002',
           rule_name: 'SSH Open To Internet',
-          mitre: ['T1043'],
           remediation: 'Restrict CIDR blocks to corporate office range or VPN endpoints.',
           status: 'open',
         }

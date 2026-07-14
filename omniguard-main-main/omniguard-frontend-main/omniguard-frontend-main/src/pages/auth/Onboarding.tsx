@@ -76,11 +76,12 @@ export default function Onboarding() {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        // Query organization with this invite code in settings
+        // Query organizations and find the one matching the invite code
         const { data: orgs, error: orgErr } = await supabase
           .from('organizations')
-          .select('id, name, settings')
-          .neq('deleted_at', null); // dummy target check or generic select
+          .select('id, name, settings');
+
+        if (orgErr) throw orgErr;
 
         const targetOrg = orgs?.find((o: any) => o.settings?.invite_code === inviteCode.trim().toUpperCase());
 

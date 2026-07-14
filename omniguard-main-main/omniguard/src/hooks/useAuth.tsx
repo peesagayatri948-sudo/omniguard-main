@@ -33,33 +33,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let mounted = true
+
     supabaseAuth.getSession().then(({ data: { session } }: any) => {
+      if (!mounted) return
       setSession(session)
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setLoading(false)
-    })
+      if (session?.user) {
+        fetchProfile(session.user.id).catch(() => mounted && setLoading(false))
+      } else {
+        setLoading(false)
+      }
+    }).catch(() => mounted && setLoading(false))
+
     const { data: { subscription } } = supabaseAuth.onAuthStateChange((_event: unknown, session: any) => {
       setSession(session)
       setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else { setProfile(null); setMemberships([]); setCurrentOrganizationId(null); setLoading(false) }
+      if (session?.user) {
+        fetchProfile(session.user.id).catch(() => mounted && setLoading(false))
+      } else {
+        setProfile(null)
+        setMemberships([])
+        setCurrentOrganizationId(null)
+        setCurrentRole(null)
+        setLoading(false)
+      }
     })
-    return () => subscription.unsubscribe()
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   async function fetchProfile(userId: string) {
-    const [{ data: prof }, { data: mems }] = await Promise.all([
-      supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
-      supabase.from('organization_members').select('*').eq('user_id', userId).eq('status', 'active'),
-    ])
-    setProfile(prof)
-    setMemberships(mems || [])
-    if (mems?.length) {
-      setCurrentOrganizationId(mems[0].organization_id)
-      setCurrentRole(mems[0].role)
+    try {
+      const [{ data: prof, error: profErr }, { data: mems, error: memErr }] = await Promise.all([
+        supabase.from('user_profiles').select('*').eq('id', userId).maybeSingle(),
+        supabase.from('organization_members').select('*').eq('user_id', userId).eq('status', 'active'),
+      ])
+      if (profErr) console.error('Profile fetch error:', profErr.message)
+      if (memErr) console.error('Membership fetch error:', memErr.message)
+      setProfile(prof)
+      setMemberships(mems || [])
+      if (mems?.length) {
+        setCurrentOrganizationId(mems[0].organization_id)
+        setCurrentRole(mems[0].role)
+      } else {
+        setCurrentOrganizationId(null)
+        setCurrentRole(null)
+      }
+    } catch (err) {
+      console.error('fetchProfile failed:', err)
+      setProfile(null)
+      setMemberships([])
+      setCurrentOrganizationId(null)
+      setCurrentRole(null)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   async function signIn(email: string, password: string) {

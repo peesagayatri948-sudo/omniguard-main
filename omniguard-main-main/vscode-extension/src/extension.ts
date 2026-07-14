@@ -328,6 +328,20 @@ export function activate(context: vscode.ExtensionContext) {
     terminal.sendText(`${cli} agent map`)
   })
 
+  const cmdScanWorkspace = vscode.commands.registerCommand('omniguard.scanWorkspace', async () => {
+    const folders = vscode.workspace.workspaceFolders
+    if (!folders || folders.length === 0) {
+      vscode.window.showInformationMessage('Open a workspace folder to scan.')
+      return
+    }
+    const uris = await vscode.workspace.findFiles('**/*', '{**/node_modules/**,**/dist/**,**/build/**,**/.git/**}')
+    for (const uri of uris) {
+      const doc = await vscode.workspace.openTextDocument(uri)
+      await runScan(doc)
+    }
+    vscode.window.showInformationMessage(`OmniGuard workspace scan complete.`)
+  })
+
   // Watch saves
   const onSave = vscode.workspace.onDidSaveTextDocument(doc => {
     const config = vscode.workspace.getConfiguration('omniguard')
@@ -337,7 +351,7 @@ export function activate(context: vscode.ExtensionContext) {
   })
 
   context.subscriptions.push(
-    cmdScanFile, cmdExplain, cmdCreateJira, cmdCreateServiceNow,
+    cmdScanFile, cmdScanWorkspace, cmdExplain, cmdCreateJira, cmdCreateServiceNow,
     cmdConfigure, cmdClear, cmdShow, cmdNexusGraph, cmdAgentMap, onSave
   )
 
