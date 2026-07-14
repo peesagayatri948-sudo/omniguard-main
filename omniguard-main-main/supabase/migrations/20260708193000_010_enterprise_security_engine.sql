@@ -12,7 +12,7 @@ ALTER TABLE scans ADD CONSTRAINT scans_scan_type_check CHECK (
 
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS business_impact text;
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS suggested_commit text;
-ALTER TABLE findings ADD COLUMN IF NOT EXISTS references text[] NOT NULL DEFAULT '{}';
+ALTER TABLE findings ADD COLUMN IF NOT EXISTS REFERENCES text[] NOT NULL DEFAULT '{}';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS epss_score real;
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS compliance_mapping jsonb NOT NULL DEFAULT '{}';
 ALTER TABLE findings ADD COLUMN IF NOT EXISTS ai_remediation_details jsonb NOT NULL DEFAULT '{}';
