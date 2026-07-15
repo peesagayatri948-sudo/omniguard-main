@@ -1,490 +1,711 @@
-# OmniGuard — Complete Setup, Deployment & Publishing Guide
+# OmniGuard Enterprise v2.2.5 — Complete Setup Guide
+
+From `git clone` to working dashboard, CLI, VS Code extension, Docker, and AWS pro scanning.
+
+---
 
 ## Prerequisites
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Node.js | ≥ 18 | https://nodejs.org |
-| npm | ≥ 9 | bundled with Node |
-| Git | any | for hooks feature |
-| VS Code | ≥ 1.80 | for extension feature |
-| Supabase account | free tier works | https://supabase.com |
+| Node.js | >= 20 | https://nodejs.org |
+| npm | >= 9 | bundled with Node |
+| Git | any | for hooks + repo scanning |
+| VS Code | >= 1.80 | for extension feature |
+| Docker | >= 24 | for Docker deployment (optional) |
+| AWS CLI | >= 2 | for AWS pro scanning (optional) |
 
 ---
 
-## 1. Repository Structure
+## 1. Clone & Understand the Structure
+
+```bash
+git clone <your-repo-url> omniguard
+cd omniguard
+```
 
 ```
 omniguard/
-├── omniguard/          # React frontend (Vite + TypeScript + Tailwind)
+├── .env.example              ← master env template (copy this to .env)
+├── Dockerfile.v225           ← multi-stage Docker build (dashboard + CLI + daemon)
+├── aws-pro-scan-ecs.yaml     ← CloudFormation for AWS ECS pro scanning
+├── publish-all-v225.sh       ← publishes CLI + extension + Docker images
+├── publish-all-v225.ps1      ← same, for Windows
+├── omniguard/                ← React dashboard (Vite + TS + Tailwind)
+├── cli/                      ← CLI npm package (omniguard-enterprise-cli)
+├── vscode-extension/         ← VS Code extension
 ├── supabase/
-│   ├── functions/      # Deno edge functions
-│   │   ├── _shared/ai.ts          # AI provider abstraction (vault-aware)
-│   │   ├── secrets-proxy/         # AI key vault storage (replaces client-side key storage)
-│   │   ├── scan-quick/            # Fast file scan (no DB required)
-│   │   ├── scan-worker/           # Full async scan worker
-│   │   ├── api-v1-findings/       # Findings CRUD + AI remediation
-│   │   ├── api-v1-scans/          # Scan management
-│   │   ├── api-v1-status/         # Health check
-│   │   ├── policy-ingest/         # Document → policy ingestion
-│   │   ├── github-webhook/        # GitHub push/PR webhooks
-│   │   └── enterprise-integrations/
-│   └── migrations/     # PostgreSQL migrations (applied in order)
-├── cli/                # npm package — omniguard CLI
-│   ├── package.json
-│   └── src/index.js    # Single-file CLI, no external deps
-├── vscode-extension/   # VS Code extension
-│   ├── package.json
-│   ├── src/extension.ts
-│   └── out/extension.js (compiled)
-└── omniguard-main/
-    ├── scanner/        # TypeScript scanner engine
-    ├── install.sh      # One-shot local installer
-    └── docs/           # Additional documentation
+│   ├── functions/            ← Deno edge functions
+│   └── migrations_clean/     ← 9 clean migrations (001-009)
+└── omniguard-main/           ← scanner engine + docs
 ```
 
 ---
 
-## 2. Supabase Project Setup
+## 2. Environment Setup (REQUIRED FIRST)
 
-### 2a. Create a project
+### 2a. Copy the template
 
-1. Go to https://supabase.com/dashboard
-2. Click **New Project**
-3. Choose a name, database password, and region
-4. Wait ~2 minutes for provisioning
+```bash
+cp .env.example .env
+```
 
-### 2b. Get your credentials
+### 2b. Fill in the required values
 
-From **Project Settings → API**:
-- `Project URL` → your `SUPABASE_URL`
-- `anon public` key → your `SUPABASE_ANON_KEY`
-- `service_role` key → your `SUPABASE_SERVICE_ROLE_KEY` (keep secret)
+Open `.env` and set these **5 required** variables (everything else is optional):
 
-### 2c. Apply the database schema
+```env
+# ── Required: Supabase credentials (from Supabase dashboard → Settings → API) ──
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=eyJ...your-anon-key...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...your-service-role-key...
 
-The schema is applied via Supabase MCP tools (already done if you cloned a configured project). If setting up fresh:
+# ── Required: Vite build-time copies (must mirror the above two) ──
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...your-anon-key...
+```
 
-1. Open Supabase dashboard → **SQL Editor**
-2. Run each migration file from `supabase/migrations/` in order:
-   - `001_omniguard_security_platform_schema.sql`
-   - `002_rls_policies.sql`
-   - `003_functions_triggers_seeds.sql` (empty — superseded by 008)
-   - `004_worker_queue_functions.sql`
-   - `005_add_scan_metadata_and_indexes.sql`
-   - `006_scan_worker_scheduler.sql`
-   - `007_helper_functions.sql`
-   - `008_omniguard_v1_critical_fixes.sql` ← critical, apply this
-   - `009_ai_keys_vault_ref.sql`
+### 2c. Optional but recommended
+
+```env
+# For npm publishing (section 10)
+NPM_TOKEN=npm_xxxxx
+
+# For AI remediation + semantic scanning (at least one)
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+
+# For AWS pro scanning
+AWS_ACCESS_KEY_ID=AKIAxxxxx
+AWS_SECRET_ACCESS_KEY=xxxxx
+AWS_REGION=us-east-1
+
+# For Okta SSO (auto-detected in production)
+OKTA_DOMAIN=yourco.okta.com
+OKTA_CLIENT_ID=0oaxxxxx
+OKTA_CLIENT_SECRET=xxxxx
+```
+
+The `.env.example` file has every variable the CLI, dashboard, edge functions, and Docker images reference, grouped by category with comments.
 
 ---
 
-## 3. Frontend (Dashboard) Setup
+## 3. Supabase Setup
+
+### 3a. Create a project (if you don't have one)
+
+1. Go to https://supabase.com/dashboard
+2. Click **New Project** — choose name, password, region
+3. Wait ~2 minutes for provisioning
+
+### 3b. Get credentials
+
+From **Project Settings → API**:
+- `Project URL` → `SUPABASE_URL` + `VITE_SUPABASE_URL`
+- `anon public` key → `SUPABASE_ANON_KEY` + `VITE_SUPABASE_ANON_KEY`
+- `service_role` key → `SUPABASE_SERVICE_ROLE_KEY`
+
+### 3c. Apply database migrations
+
+The 9 clean migrations in `supabase/migrations_clean/` create 28 tables, 85+ RLS policies, 8 RPCs, triggers, and storage. They are applied via the Supabase MCP `apply_migration` tool (already done if your project was set up by the agent). To verify:
+
+```sql
+-- Run in Supabase SQL Editor to check
+SELECT count(*) FROM pg_tables WHERE schemaname = 'public';
+-- Should return 28+
+```
+
+If setting up fresh, apply each migration file in order (001 through 009) via the Supabase MCP tool or paste them into the SQL Editor.
+
+### 3d. Edge functions
+
+Edge functions are deployed via the Supabase MCP `deploy_edge_function` tool. Already-deployed functions:
+
+| Function | Purpose |
+|---|---|
+| `secrets-proxy` | AI key vault storage (encrypted) |
+| `scan-quick` | Fast file scan (no DB required) |
+| `scan-worker` | Full async scan worker |
+| `api-v1-findings` | Findings CRUD + AI remediation |
+| `api-v1-scans` | Scan management |
+| `api-v1-status` | Health check |
+| `api-v1-api-keys` | API key generation + revocation |
+| `api-v1-members` | Org member management |
+| `policy-ingest` | Document to policy ingestion |
+| `github-webhook` | GitHub push/PR webhook receiver |
+| `enterprise-integrations` | Okta, Jira, Slack, Teams, ServiceNow |
+| `notify-deliver` | Notification delivery |
+| `okta-sso` | Okta SSO flow (initiate, callback, status) |
+| `api-gateway` | Unified API gateway |
+
+---
+
+## 4. Dashboard — Local Development
 
 ```bash
 cd omniguard/
 
-# Copy environment template
-cp .env.example .env    # or create .env manually
-
-# Edit .env
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key-here
-
 # Install dependencies
 npm install
 
-# Start development server (http://localhost:5173)
+# Start dev server (http://localhost:5173)
 npm run dev
-
-# Build for production
-npm run build
-# Output: omniguard/dist/
 ```
 
-### Environment variables
+### Build for production
 
-| Variable | Required | Description |
-|---|---|---|
-| `VITE_SUPABASE_URL` | Yes | Your Supabase project URL |
-| `VITE_SUPABASE_ANON_KEY` | Yes | Your Supabase anon public key |
+```bash
+npm run build       # outputs to omniguard/dist/
+npm run preview     # serves the production build locally
+```
+
+### What you get
+
+- Sign up / sign in (email + password)
+- Organization management (create, invite, switch)
+- Dashboard with risk score, finding trends, scan history
+- Repositories (connect GitHub repos)
+- Scans (trigger, view results, real-time status)
+- Findings (filter, suppress, AI remediation)
+- Compliance (OWASP ASVS, PCI DSS, NIST, ISO 27001, CIS, SOC 2)
+- Architecture Graph (force-directed canvas, per-user snapshots, diff view)
+- Audit Clauses (deterministic compliance clause mapping, 7 frameworks)
+- AI Center (provider routing, token usage charts, cache stats)
+- Audit Logs (realtime, export, detail drawer)
+- Reports (JSON, CSV, Markdown, SARIF, HTML export)
+- Advanced Settings (Okta SSO, AWS pro scan, performance tuning)
 
 ---
 
-## 4. Edge Functions Deployment
+## 5. CLI — Local Development
 
-Edge functions are deployed to your Supabase project. They run on Deno.
-
-### Deploy all functions
-
-```bash
-# Install Supabase CLI (optional — only needed for local dev)
-npm install -g supabase
-
-# Or deploy via the Supabase MCP tool (recommended in Bolt/Claude)
-# The functions are already deployed if you used the provided setup
-```
-
-### Manual deploy via Supabase CLI
-
-```bash
-cd supabase/
-
-# Login to Supabase
-supabase login
-
-# Link to your project
-supabase link --project-ref your-project-id
-
-# Deploy all functions
-supabase functions deploy secrets-proxy
-supabase functions deploy scan-quick
-supabase functions deploy scan-worker
-supabase functions deploy api-v1-findings
-supabase functions deploy api-v1-scans
-supabase functions deploy api-v1-status
-supabase functions deploy policy-ingest
-supabase functions deploy github-webhook
-supabase functions deploy enterprise-integrations
-```
-
-### Function URLs
-
-After deploying, functions are available at:
-```
-https://your-project-id.supabase.co/functions/v1/<function-name>
-```
-
----
-
-## 5. CLI Setup
-
-### Local development (no npm publish needed)
+### 5a. Install from source
 
 ```bash
 cd cli/
 
-# Make executable
-chmod +x src/index.js
+# Install CLI dependencies
+npm install
 
-# Install globally from local source (npm link)
+# Link globally so `omniguard` command works everywhere
 npm link
 
-# Verify installation
+# Verify
 omniguard version
+# Should print: omniguard-enterprise-cli/2.2.5
+
 omniguard doctor
+# Runs full diagnostics
 ```
 
-### Usage
+### 5b. Authenticate
 
 ```bash
-# Authenticate (run once)
+# Interactive login (prompts for URL + API key)
 omniguard login
-# Enter your Supabase Functions URL and API key when prompted
 
-# Scan current directory
+# Or set env vars:
+export OMNIGUARD_API_URL="https://your-project.supabase.co/functions/v1"
+export OMNIGUARD_API_KEY="og_live_xxxxx"   # from dashboard → Settings → API Keys
+```
+
+### 5c. Scan commands
+
+```bash
+# Standard scan
 omniguard scan .
 
-# Scan specific file
-omniguard scan src/app.ts
+# Pro scan (semantic + graph + audit clauses)
+omniguard scan --pro
 
-# Scan staged files (for pre-commit)
-omniguard scan --staged
+# AWS pro scan (ECR + Lambda + IAM)
+omniguard scan --aws-scan
 
-# Install git hooks in current repo
-omniguard install-hooks
+# Combined pro + AWS
+omniguard scan --pro --aws-scan --semantic --audit
+
+# Semantic-only scan (taint analysis)
+omniguard semantic .
+
+# Architecture graph (JSON/DOT/Mermaid output)
+omniguard graph . --format json
+
+# Audit clause report (7 compliance frameworks)
+omniguard audit .
 
 # Watch for changes
 omniguard watch
 
-# Check status
-omniguard status
-omniguard doctor
+# Install git hooks
+omniguard install-hooks
 ```
 
-### Environment variables (alternative to login)
+### 5d. Offline mode
+
+The CLI works without any Supabase connection — local secret scanner, semantic engine, graph engine, and audit clause mapper all run offline:
 
 ```bash
-export OMNIGUARD_URL="https://your-project.supabase.co/functions/v1"
-export OMNIGUARD_API_KEY="og_live_..."       # from Dashboard → Settings → API Keys
-export OMNIGUARD_FAIL_ON="critical"          # critical|high|medium|low
+omniguard scan .          # works offline
+omniguard semantic .      # works offline
+omniguard graph .         # works offline
+omniguard audit .         # works offline
 ```
-
-### Offline mode
-
-The CLI works without any Supabase connection. It runs the built-in secret scanner locally:
-- AWS access keys, GitHub PATs, OpenAI keys, Anthropic keys, Stripe keys
-- SSH private keys, database connection strings, JWT tokens, npm tokens
-- Hardcoded passwords, Google API keys, Azure connection strings
 
 ---
 
 ## 6. VS Code Extension
 
-### Install from packaged .vsix (local)
+### 6a. Build from source
 
 ```bash
 cd vscode-extension/
 
-# The .vsix is already built at:
-# vscode-extension/omniguard-1.0.0.vsix
-
-# Install in VS Code
-code --install-extension omniguard-1.0.0.vsix
-
-# Or via VS Code UI: Extensions → ... → Install from VSIX
-```
-
-### Build from source
-
-```bash
-cd vscode-extension/
-
+# Install dependencies (after CLI is published to npm, or use npm link)
 npm install
-npm run compile     # TypeScript → out/extension.js
-npm run package     # Packages as omniguard-1.0.0.vsix
+
+# Compile TypeScript
+npm run compile
+
+# Package as .vsix
+npm run package
+# Produces omniguard-2.2.5.vsix
 ```
 
-### Configure in VS Code
+### 6b. Install
 
-1. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`)
-2. Run **OmniGuard: Configure**
-3. Enter your Supabase Functions URL
-4. Enter your API key
+```bash
+# Command line
+code --install-extension omniguard-2.2.5.vsix
 
-Or edit VS Code settings directly:
+# Or VS Code UI: Extensions panel → ... → Install from VSIX
+```
+
+### 6c. Configure
+
+Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
+1. Run **OmniGuard: Configure**
+2. Enter your Supabase Functions URL
+3. Enter your API key
+
+Or edit VS Code settings:
+
 ```json
 {
   "omniguard.supabaseUrl": "https://your-project.supabase.co/functions/v1",
-  "omniguard.apiKey": "og_live_...",
+  "omniguard.apiKey": "og_live_xxxxx",
   "omniguard.enableOnSave": true,
-  "omniguard.failOnSeverity": "high"
+  "omniguard.enableOnType": true,
+  "omniguard.scanDelay": 500,
+  "omniguard.semanticScan": true,
+  "omniguard.cliPath": ""
 }
 ```
 
-### Features
+The extension uses `omniguard-enterprise-cli` for scanning. It resolves the CLI binary from:
+1. `omniguard.cliPath` setting (if set)
+2. Local `node_modules/omniguard-enterprise-cli` (bundled dependency)
+3. Global npm install (`npm install -g omniguard-enterprise-cli`)
+4. `npx omniguard-enterprise-cli` (fallback)
+
+### 6d. Features
 
 | Feature | Description |
 |---|---|
-| On-save scanning | Automatic scan every time you save |
-| On-type scanning | Optional, debounced (set `enableOnType: true`) |
+| On-save scanning | Auto-scan every file on save |
+| On-type scanning | Debounced real-time scan while typing (500ms default) |
+| Semantic scan | Taint analysis with source-to-sink data flow |
+| Hover explanations | Taint flow, compliance clauses, AI remediation on hover |
+| Findings panel | Activity bar tree view of all findings |
+| Semantic panel | Tree view of semantic findings with clause details |
+| Graph panel | Architecture graph nodes sorted by risk |
+| Audit report | Webview HTML report with 7 compliance frameworks |
 | Inline diagnostics | Red/yellow underlines on vulnerable lines |
-| Hover explanations | Hover over a finding for details + AI explanation |
-| Quick fixes | Suppress a rule or apply AI fix via lightbulb menu |
-| Findings panel | Activity bar panel showing all findings across workspace |
-| Workspace scan | Scan all files via Command Palette |
-| Offline mode | Works without Supabase (local secret scanner) |
+| Quick fixes | Suppress rule or apply AI fix via lightbulb |
 
 ---
 
-## 7. AI Key Configuration (Secure — via Vault)
+## 7. AI Provider Setup
 
-AI keys are **never stored as plaintext** in the database. They are stored in Supabase Vault and only read server-side by edge functions.
+AI keys are stored securely in Supabase Vault (encrypted at rest) via the `secrets-proxy` edge function.
 
-1. Open the Dashboard
-2. Go to **Settings → AI Configuration**
-3. Select your provider (Anthropic, OpenAI, Bedrock, Azure, Gemini, OpenRouter, Ollama)
-4. Enter your API key
-5. Click **Save AI Settings**
+### Via dashboard
 
-The key is:
-- Posted to the `secrets-proxy` edge function (HTTPS)
-- Stored in Supabase Vault (encrypted at rest using pgsodium)
-- Only a vault reference ID is saved in the `organizations` table
-- Raw keys are never returned to the browser
+1. Dashboard → **Settings → AI Configuration**
+2. Select provider (Anthropic, OpenAI, Gemini, OpenRouter, Ollama)
+3. Enter API key
+4. Click **Save**
 
-**Supported providers:**
+### Via .env (for CLI / edge functions)
 
-| Provider | Key field | Notes |
+```env
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+# or
+OPENAI_API_KEY=sk-xxxxx
+# or
+GEMINI_API_KEY=xxxxx
+```
+
+| Provider | Env Var | Notes |
 |---|---|---|
-| Anthropic | `anthropic_api_key` | Claude 3.5 Haiku / Sonnet |
-| OpenAI | `openai_api_key` | GPT-4o / GPT-4o mini |
-| AWS Bedrock | `aws_access_key_id` + `aws_secret_access_key` | Claude via Bedrock |
-| Azure OpenAI | `azure_openai_endpoint` + `azure_openai_key` | Custom deployments |
-| Google Gemini | `gemini_api_key` | Gemini 1.5 Flash / Pro |
-| OpenRouter | `openrouter_api_key` | Multi-provider routing |
-| Ollama | `ollama_url` | Self-hosted, no key needed |
+| Anthropic | `ANTHROPIC_API_KEY` | Claude 3.5 Haiku / Sonnet |
+| OpenAI | `OPENAI_API_KEY` | GPT-4o / GPT-4o mini |
+| Gemini | `GEMINI_API_KEY` | Gemini 1.5 Flash / Pro |
+| OpenRouter | `OPENROUTER_API_KEY` | Multi-provider routing |
+| Ollama | `OLLAMA_BASE_URL` | Self-hosted, no key needed |
+| LiteLLM | `LITELLM_BASE_URL` | Proxy to multiple providers |
 
 ---
 
-## 8. GitHub Webhook Setup
+## 8. Okta SSO Setup
 
-1. Go to your GitHub repo → **Settings → Webhooks → Add webhook**
-2. Payload URL: `https://your-project.supabase.co/functions/v1/github-webhook`
-3. Content type: `application/json`
-4. Secret: generate a random string and save it as `GITHUB_WEBHOOK_SECRET` in Supabase Edge Function secrets
-5. Events: select **Push** and **Pull requests**
+### Development
 
-Then connect the repository in the OmniGuard dashboard under **Repositories**.
+1. Set in `.env`:
+```env
+OKTA_DOMAIN=yourco.okta.com
+OKTA_CLIENT_ID=0oaxxxxx
+OKTA_CLIENT_SECRET=xxxxx
+OKTA_ISSUER=https://yourco.okta.com/oauth2/default
+OKTA_REDIRECT_URI=http://localhost:5173/auth/okta/callback
+```
+
+2. Configure in dashboard → **Advanced Settings → Okta SSO** (stores config in org table, secret in vault)
+
+3. The `okta-sso` edge function handles:
+   - `GET /okta-sso/initiate?org_id=xxx` — returns Okta authorize URL
+   - `POST /okta-sso/callback` — exchanges code, provisions user, creates org membership
+   - `GET /okta-sso/status` — checks if Okta is auto-detected from env vars
+
+### Production
+
+In production (`NODE_ENV=production`), Okta SSO is **always available** if `OKTA_DOMAIN` and `OKTA_CLIENT_ID` env vars are set on the server — no per-org configuration needed. The `/okta-sso/status` endpoint reports `auto_enabled: true`.
 
 ---
 
-## 9. Production Deployment
+## 9. AWS Pro Scanning
 
-### Option A: Static hosting (frontend only)
+### 9a. Configure AWS credentials
 
-Deploy `omniguard/dist/` to any static host:
+In `.env`:
+```env
+AWS_ACCESS_KEY_ID=AKIAxxxxx
+AWS_SECRET_ACCESS_KEY=xxxxx
+AWS_REGION=us-east-1
+AWS_SCAN_ENABLED=true
+```
+
+Or via dashboard → **Advanced Settings → AWS Pro Scan**.
+
+### 9b. Run AWS pro scan via CLI
+
+```bash
+# Scan local files + AWS resources
+omniguard scan --pro --aws-scan
+
+# AWS-only scan (no local files)
+omniguard scan --aws-scan
+```
+
+This scans:
+- **ECR** — all repositories, checks for missing resource policies
+- **Lambda** — all functions, detects deprecated runtimes
+- **IAM** — custom policies flagged for least-privilege review
+
+Each finding includes mapped compliance clauses (CIS, OWASP ASVS, NIST 800-53).
+
+### 9c. Run via Docker
+
+```bash
+# Build the CLI Docker image
+cd cli/
+docker build -f Dockerfile.v225 -t omniguard/cli:2.2.5 .
+
+# Run a pro scan
+docker run --rm \
+  -e SUPABASE_URL=$SUPABASE_URL \
+  -e SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
+  -e SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY \
+  -e AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY \
+  -e AWS_REGION=$AWS_REGION \
+  -e OMNIGUARD_SCAN_TIER=pro \
+  -v /path/to/project:/scan \
+  omniguard/cli:2.2.5 scan /scan --pro --aws-scan --json
+```
+
+### 9d. Deploy to AWS ECS (scheduled pro scans)
+
+```bash
+# Deploy the CloudFormation stack
+aws cloudformation create-stack \
+  --stack-name omniguard-pro-scan \
+  --template-body file://aws-pro-scan-ecs.yaml \
+  --parameters \
+    ParameterKey=DockerImage,ParameterValue=omniguard/cli:2.2.5 \
+    ParameterKey=SubnetId,ParameterValue=subnet-xxxxx \
+    ParameterKey=SecurityGroupId,ParameterValue=sg-xxxxx \
+    ParameterKey=SupabaseUrl,ParameterValue=https://your-project.supabase.co \
+    ParameterKey=SupabaseAnonKey,ParameterValue=eyJ... \
+    ParameterKey=SupabaseServiceKey,ParameterValue=eyJ... \
+    ParameterKey=AwsScanAccessKeyId,ParameterValue=AKIAxxxxx \
+    ParameterKey=AwsScanSecretAccessKey,ParameterValue=xxxxx \
+  --capabilities CAPABILITY_IAM
+```
+
+This creates:
+- ECS Fargate cluster (`omniguard-pro-scan`)
+- Task definition with 2 vCPU / 4 GB memory
+- IAM role with ECR/Lambda/IAM/S3 read permissions
+- Secrets in AWS Secrets Manager
+- EventBridge schedule running pro scans every 12 hours
+- CloudWatch log group (30-day retention)
+
+To trigger a manual scan:
+```bash
+aws ecs run-task \
+  --cluster omniguard-pro-scan \
+  --task-definition omniguard-pro-scan \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[subnet-xxxxx],securityGroups=[sg-xxxxx]}"
+```
+
+---
+
+## 10. Docker Deployment (Full Stack)
+
+### 10a. Build the dashboard + CLI + daemon image
+
+```bash
+# From repo root
+docker build \
+  -f Dockerfile.v225 \
+  -t omniguard/dashboard:2.2.5 \
+  -t omniguard/dashboard:latest \
+  --build-arg VITE_SUPABASE_URL=$SUPABASE_URL \
+  --build-arg VITE_SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
+  .
+```
+
+### 10b. Run
+
+```bash
+docker run -d \
+  --name omniguard \
+  -p 5173:5173 \
+  -p 5175:5175 \
+  -e SUPABASE_URL=$SUPABASE_URL \
+  -e SUPABASE_ANON_KEY=$SUPABASE_ANON_KEY \
+  -e SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY \
+  -e AI_PROVIDER=$AI_PROVIDER \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  omniguard/dashboard:2.2.5
+```
+
+- Port 5173: Dashboard (Vite preview)
+- Port 5175: CLI daemon (background)
+
+### 10c. Docker Compose
+
+```bash
+# From repo root
+docker-compose up -d
+```
+
+---
+
+## 11. Publishing v2.2.5 (CLI + Extension + Docker)
+
+### Prerequisites
+
+- npm account with publish access to `omniguard-enterprise-cli`
+- VS Code Marketplace publisher account
+- `NPM_TOKEN` env var set
+
+### 11a. Set your NPM_TOKEN
+
+```bash
+# Linux/macOS
+export NPM_TOKEN=npm_xxxxxxxxxxxxx
+
+# Windows PowerShell
+$env:NPM_TOKEN = "npm_xxxxxxxxxxxxx"
+```
+
+### 11b. Run the publish script
+
+```bash
+# Linux/macOS
+./publish-all-v225.sh
+
+# Windows PowerShell
+.\publish-all-v225.ps1
+```
+
+This script:
+
+1. **Publishes CLI** to npm as `omniguard-enterprise-cli@2.2.5`
+2. **Publishes VS Code extension** to Marketplace as `omniguard@2.2.5` (installs CLI as npm dependency)
+3. **Builds dashboard Docker image** `omniguard/dashboard:2.2.5`
+4. **Builds CLI Docker image** `omniguard/cli:2.2.5`
+5. Pushes to `DOCKER_REGISTRY` if set
+
+The script verifies versions match `2.2.5` before publishing and cleans up `.npmrc` after.
+
+### 11c. Manual individual publishes
+
+```bash
+# CLI only
+cd cli/
+npm publish --access public
+
+# Extension only
+cd vscode-extension/
+npm install omniguard-enterprise-cli@2.2.5 --save
+npx vsce package
+npx vsce publish
+
+# Docker only
+docker build -f Dockerfile.v225 -t omniguard/dashboard:2.2.5 .
+docker build -f cli/Dockerfile.v225 -t omniguard/cli:2.2.5 .
+```
+
+---
+
+## 12. Cloud Deployment Options
+
+### Option A: Static hosting (dashboard only)
+
+Deploy `omniguard/dist/` to any static host. Backend is entirely Supabase (managed).
 
 ```bash
 # Vercel
 cd omniguard && npx vercel --prod
 
 # Netlify
-cd omniguard && npx netlify-cli deploy --prod --dir=dist
+cd omniguard && npx netlify deploy --prod --dir=dist
 
-# Any static server
-npx serve omniguard/dist
+# S3 + CloudFront
+aws s3 sync omniguard/dist/ s3://your-bucket/
 ```
 
-The backend is entirely Supabase (managed) — no server needed for the frontend.
+### Option B: Docker (full stack)
 
-### Option B: Docker
-
-```bash
-# From omniguard/ directory
-docker build -f Dockerfile -t omniguard-frontend .
-docker run -p 3000:80 \
-  -e VITE_SUPABASE_URL=https://your-project.supabase.co \
-  -e VITE_SUPABASE_ANON_KEY=your-anon-key \
-  omniguard-frontend
-```
+See section 10.
 
 ### Option C: Render / Railway
 
-1. Connect your GitHub repository
-2. Set root directory to `omniguard/`
-3. Build command: `npm install && npm run build`
-4. Publish directory: `dist`
-5. Set environment variables: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+1. Connect GitHub repository
+2. Root directory: `omniguard/`
+3. Build: `npm install && npm run build`
+4. Publish: `dist`
+5. Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 
-### Option D: AWS / GCP / Azure
+### Option D: AWS ECS (pro scanning)
 
-Deploy `omniguard/dist/` to S3+CloudFront, Cloud Storage, or Azure Static Web Apps. All backend infrastructure is Supabase.
+See section 9d.
 
 ---
 
-## 10. Publishing the CLI to npm
+## 13. API Key Generation
 
-When ready to publish `omniguard` CLI publicly:
+API keys are needed for CLI and VS Code extension authentication.
+
+1. Sign in to dashboard
+2. Go to **Settings → API Keys**
+3. Click **Generate New Key**
+4. Copy the key (shown once, format: `og_live_xxxxx`)
+5. Use as `OMNIGUARD_API_KEY` in CLI or VS Code extension
+
+Keys are SHA-256 hashed before storage — raw keys are never stored in the database.
+
+---
+
+## 14. Quick Start (TL;DR)
 
 ```bash
-cd cli/
+# 1. Clone
+git clone <repo-url> omniguard && cd omniguard
 
-# Update version in package.json
-npm version patch   # or minor/major
+# 2. Environment
+cp .env.example .env
+# Edit .env — set SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
+#             VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
 
-# Ensure you're logged in to npm
-npm login
+# 3. Dashboard
+cd omniguard && npm install && npm run dev
+# → http://localhost:5173
 
-# Publish
-npm publish --access public
+# 4. CLI (new terminal)
+cd ../cli && npm install && npm link
+omniguard login     # or set OMNIGUARD_API_URL + OMNIGUARD_API_KEY in .env
+omniguard doctor
+omniguard scan --pro
 
-# Users can then install with:
-# npm install -g omniguard
+# 5. VS Code extension
+cd ../vscode-extension && npm install && npm run compile && npm run package
+code --install-extension omniguard-2.2.5.vsix
+
+# 6. Docker (optional)
+cd ..
+docker build -f Dockerfile.v225 -t omniguard/dashboard:2.2.5 \
+  --build-arg VITE_SUPABASE_URL=$VITE_SUPABASE_URL \
+  --build-arg VITE_SUPABASE_ANON_KEY=$VITE_SUPABASE_ANON_KEY .
+docker run -d -p 5173:5173 omniguard/dashboard:2.2.5
+
+# 7. Publish v2.2.5 (optional)
+export NPM_TOKEN=npm_xxxxx
+./publish-all-v225.sh
 ```
 
-Until published, users use `npm link` for local development (see section 5).
-
 ---
 
-## 11. Publishing the VS Code Extension to Marketplace
-
-When ready to publish publicly:
-
-```bash
-cd vscode-extension/
-
-# Install vsce
-npm install -g @vscode/vsce
-
-# Create a publisher account at https://marketplace.visualstudio.com/manage
-# Then create a Personal Access Token in Azure DevOps
-
-# Login with your publisher name
-vsce login your-publisher-name
-
-# Update publisher in package.json to match your account
-# Then publish:
-vsce publish
-
-# Or publish a specific version:
-npm version patch
-vsce publish patch
-```
-
-Until published, distribute via `.vsix` file (already built at `vscode-extension/omniguard-1.0.0.vsix`).
-
----
-
-## 12. API Keys (for external integrations)
-
-Create API keys for the CLI and external tools from the dashboard:
-
-1. Dashboard → **Settings → API Keys**
-2. Click **Generate New Key**
-3. Copy the key (shown once)
-4. Use it as `OMNIGUARD_API_KEY` in CLI or VS Code extension
-
-API keys use the format `og_live_...` and are hashed (SHA-256) before storage — raw keys are never stored.
-
----
-
-## 13. Troubleshooting
+## 15. Troubleshooting
 
 ### "No findings" when expecting results
 
-- The scanner skips lines with `// test`, `example`, `placeholder`, `changeme` in the match
-- Lines preceded by `// omniguard-suppress RULE-ID` are suppressed
-- Check `OMNIGUARD_FAIL_ON` — if set to `critical`, `high` findings won't block
+- The scanner skips test/example lines
+- Check `OMNIGUARD_FAIL_ON` severity threshold
+- Run `omniguard scan --json` to see raw output
 
-### "Connection failed" in CLI
+### CLI connection failed
 
 ```bash
-omniguard doctor    # runs full diagnostics
-omniguard status    # tests Supabase connection
+omniguard doctor    # full diagnostics
+omniguard status    # test Supabase connection
 ```
 
 Check:
-- `OMNIGUARD_URL` ends with `/functions/v1` (no trailing slash)
+- `OMNIGUARD_API_URL` ends with `/functions/v1` (no trailing slash)
 - API key starts with `og_live_` or is a Supabase JWT
-- Edge functions are deployed and not paused
+- Edge functions are deployed
 
 ### VS Code extension not scanning
 
-- Check Output panel → OmniGuard channel for errors
+- Check Output panel → OmniGuard channel
 - Run **OmniGuard: Configure** to re-enter credentials
-- File must be saved for on-save scanning to trigger
-- Run **OmniGuard: Scan Current File** manually to test
+- Ensure `omniguard-enterprise-cli` is installed (`npm install -g omniguard-enterprise-cli`)
+- Run **OmniGuard: Scan Current File** manually
 
 ### AI not working
 
-- Go to Settings → AI Configuration → Test Connection
-- Verify the key is saved (look for ✓ configured badge)
-- Check provider is set (not "None")
-- Ollama: ensure `ollama serve` is running and `ollama_url` is reachable from the edge function
+- Dashboard → Settings → AI Configuration → verify provider + key
+- Check `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` is set in `.env`
+- For Ollama: ensure `ollama serve` is running
+
+### Docker build fails
+
+- Ensure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are passed as build args
+- Node 20 required (`FROM node:20-alpine`)
+
+### AWS pro scan returns no findings
+
+- Verify `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` are set
+- Check IAM permissions include ECR/Lambda/IAM read access
+- Run `aws sts get-caller-identity` to verify credentials
 
 ### Database errors
 
-- Check that all migrations have been applied (001–009)
-- Run the health check: `GET /functions/v1/api-v1-status`
+- Check all 9 migrations are applied
+- Run health check: `GET /functions/v1/api-v1-status`
 - Check Supabase dashboard → Logs for edge function errors
-
----
-
-## 14. Quick Reference
-
-```bash
-# Full local setup from scratch:
-git clone <this-repo>
-cd omniguard && npm install && npm run dev     # Dashboard at :5173
-
-# CLI:
-cd ../cli && npm link && omniguard doctor
-
-# VS Code extension:
-cd ../vscode-extension && npm install && npm run compile && npm run package
-code --install-extension omniguard-1.0.0.vsix
-
-# Run install script (does CLI + hooks automatically):
-cd ../omniguard-main && bash install.sh
-```
