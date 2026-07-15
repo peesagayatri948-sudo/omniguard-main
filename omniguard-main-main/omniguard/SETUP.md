@@ -259,18 +259,24 @@ Stop-Service OmniGuardAgent
   "omniguard.semanticScan": true,
   "omniguard.scanDelay": 500,
   "omniguard.failOnSeverity": "high",
+  "omniguard.excludePatterns": ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**"],
   "omniguard.cliPath": ""
 }
 ```
 
 ### Commands
 
-- `OmniGuard: Scan Current File` - Manual scan
+- `OmniGuard: Scan Current File` - Manual scan of the active file
 - `OmniGuard: Scan Workspace` - Full workspace scan
-- `OmniGuard: Semantic Scan` - Taint tracking analysis
-- `OmniGuard: Show Architecture Graph` - Graph view
-- `OmniGuard: Audit Report` - Compliance report webview
-- `OmniGuard: Explain Finding` - AI explanation of selected finding
+- `OmniGuard: Semantic Scan (AI-Powered)` - Taint tracking and data flow analysis
+- `OmniGuard: Show Architecture Graph` - Graph view of code dependencies
+- `OmniGuard: Generate Compliance Audit` - Compliance report webview
+- `OmniGuard: AI Explain Finding` - AI explanation of selected finding
+- `OmniGuard: Configure` - Open configuration settings
+- `OmniGuard: Clear Diagnostics` - Clear all inline diagnostics
+- `OmniGuard: Show Findings Panel` - Open the findings sidebar panel
+- `OmniGuard: Show Architecture Nexus` - Interactive architecture nexus view
+- `OmniGuard: Run System Mapping Agent` - Map the system architecture
 - `OmniGuard: Run Multi-Agent Pipeline` - 4-agent autonomous fix pipeline
 - `OmniGuard: Agent Fix Current File` - Run agent pipeline on active file
 

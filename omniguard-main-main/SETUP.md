@@ -35,9 +35,9 @@ omniguard/
 ├── cli/                      ← CLI npm package (omniguard-enterprise-cli)
 ├── vscode-extension/         ← VS Code extension
 ├── supabase/
-│   ├── functions/            ← Deno edge functions
-│   └── migrations_clean/     ← 9 clean migrations (001-009)
-└── omniguard-main/           ← scanner engine + docs
+│   ├── functions/            ← Deno edge functions (okta-sso)
+│   └── migrations/           ← 9 migrations (001-009)
+└── docs/                     ← documentation
 ```
 
 ---
@@ -107,7 +107,7 @@ From **Project Settings → API**:
 
 ### 3c. Apply database migrations
 
-The 9 clean migrations in `supabase/migrations_clean/` create 28 tables, 85+ RLS policies, 8 RPCs, triggers, and storage. They are applied via the Supabase MCP `apply_migration` tool (already done if your project was set up by the agent). To verify:
+The 9 migrations in `supabase/migrations/` create 28 tables, 85+ RLS policies, 8 RPCs, triggers, and storage. They are applied via the Supabase MCP `apply_migration` tool (already done if your project was set up by the agent). To verify:
 
 ```sql
 -- Run in Supabase SQL Editor to check
@@ -119,24 +119,18 @@ If setting up fresh, apply each migration file in order (001 through 009) via th
 
 ### 3d. Edge functions
 
-Edge functions are deployed via the Supabase MCP `deploy_edge_function` tool. Already-deployed functions:
+These are the edge functions present in the repo. Deploy them via the Supabase MCP `deploy_edge_function` tool — write the source to `supabase/functions/<slug>/index.ts` first, then call the tool.
 
-| Function | Purpose |
-|---|---|
-| `secrets-proxy` | AI key vault storage (encrypted) |
-| `scan-quick` | Fast file scan (no DB required) |
-| `scan-worker` | Full async scan worker |
-| `api-v1-findings` | Findings CRUD + AI remediation |
-| `api-v1-scans` | Scan management |
-| `api-v1-status` | Health check |
-| `api-v1-api-keys` | API key generation + revocation |
-| `api-v1-members` | Org member management |
-| `policy-ingest` | Document to policy ingestion |
-| `github-webhook` | GitHub push/PR webhook receiver |
-| `enterprise-integrations` | Okta, Jira, Slack, Teams, ServiceNow |
-| `notify-deliver` | Notification delivery |
-| `okta-sso` | Okta SSO flow (initiate, callback, status) |
-| `api-gateway` | Unified API gateway |
+| Function | Source path | Purpose |
+|---|---|---|
+| `okta-sso` | `supabase/functions/okta-sso/index.ts` | Okta SSO flow (initiate, callback, status) |
+| `scan-worker` | `omniguard/supabase/functions/scan-worker/index.ts` | Full async scan worker with 3-layer AI pipeline |
+| `scan-quick` | `omniguard/supabase/functions/scan-quick/index.ts` | Fast file scan (no DB required) |
+| `api-v1-findings` | `omniguard/supabase/functions/api-v1-findings/index.ts` | Findings CRUD + AI remediation |
+| `api-v1-scans` | `omniguard/supabase/functions/api-v1-scans/index.ts` | Scan management |
+| `api-v1-status` | `omniguard/supabase/functions/api-v1-status/index.ts` | Health check |
+| `github-webhook` | `omniguard/supabase/functions/github-webhook/index.ts` | GitHub push/PR webhook receiver |
+| `enterprise-integrations` | `omniguard/supabase/functions/enterprise-integrations/index.ts` | Okta, Jira, Slack, Teams, ServiceNow |
 
 ---
 
