@@ -27,6 +27,8 @@ export VITE_SUPABASE_ANON_KEY="eyJ..."
 bash scripts/deploy-linux.sh
 # or on Windows: .\scripts\deploy-windows.ps1
 # or on macOS: bash scripts/deploy-macos.sh
+# These scripts live in the omniguard/ directory, run them from there:
+#   cd omniguard && bash scripts/deploy-linux.sh
 
 # 4. Open browser
 open http://localhost:80
@@ -133,13 +135,11 @@ The migrations are applied automatically. If you need to verify:
 
 Deploy these functions to Supabase:
 
-```bash
-# Functions are deployed automatically via Supabase
-# If you need to deploy manually:
-supabase functions deploy scan-worker
-supabase functions deploy api-v1-scans
-supabase functions deploy api-v1-findings
-```
+Edge functions are deployed via the Supabase MCP `deploy_edge_function` tool.
+Do NOT use the `supabase functions deploy` CLI — it is not supported in this environment.
+
+The function source files live in `supabase/functions/<name>/index.ts`.
+To deploy, write the source file to disk first, then call the MCP tool.
 
 Required functions:
 - `scan-worker` - Main scanning engine with 3-layer AI pipeline
@@ -252,12 +252,14 @@ Stop-Service OmniGuardAgent
 
 ```json
 {
-  "omniguard.apiEndpoint": "https://xyz.supabase.co/functions/v1",
-  "omniguard.supabaseAnonKey": "eyJ...",
-  "omniguard.scanOnSave": true,
-  "omniguard.enableRealtimeScanning": true,
-  "omniguard.showInlineDiagnostics": true,
-  "omniguard.aiEnabled": true
+  "omniguard.supabaseUrl": "https://xyz.supabase.co",
+  "omniguard.apiKey": "",
+  "omniguard.enableOnSave": true,
+  "omniguard.enableOnType": true,
+  "omniguard.semanticScan": true,
+  "omniguard.scanDelay": 500,
+  "omniguard.failOnSeverity": "high",
+  "omniguard.cliPath": ""
 }
 ```
 
@@ -265,8 +267,12 @@ Stop-Service OmniGuardAgent
 
 - `OmniGuard: Scan Current File` - Manual scan
 - `OmniGuard: Scan Workspace` - Full workspace scan
-- `OmniGuard: Sign In` - Authenticate
-- `OmniGuard: Get AI Remediation` - Get fix suggestions
+- `OmniGuard: Semantic Scan` - Taint tracking analysis
+- `OmniGuard: Show Architecture Graph` - Graph view
+- `OmniGuard: Audit Report` - Compliance report webview
+- `OmniGuard: Explain Finding` - AI explanation of selected finding
+- `OmniGuard: Run Multi-Agent Pipeline` - 4-agent autonomous fix pipeline
+- `OmniGuard: Agent Fix Current File` - Run agent pipeline on active file
 
 ---
 
@@ -274,10 +280,10 @@ Stop-Service OmniGuardAgent
 
 ```bash
 # Install globally
-npm install -g @omniguard/cli
+npm install -g omniguard-enterprise-cli
 
 # Or use npx
-npx @omniguard/cli scan
+npx omniguard-enterprise-cli scan
 
 # Install git hooks
 omniguard install-hooks
@@ -349,7 +355,8 @@ For more advanced features, create a GitHub App:
 
 ### Grafana Dashboard
 
-Import the dashboard from `monitoring/grafana-dashboard.json` for visualization.
+Metrics are available via the `GET /functions/v1/scan-worker/metrics` endpoint in Prometheus format.
+Import them into your own Grafana instance using that endpoint as a data source.
 
 ---
 
@@ -387,7 +394,7 @@ Import the dashboard from `monitoring/grafana-dashboard.json` for visualization.
 - Check edge function logs in Supabase Dashboard
 
 **VS Code extension not scanning**
-- Verify `omniguard.apiEndpoint` points to your Supabase functions URL
+- Verify `omniguard.supabaseUrl` points to your Supabase project URL
 - Check output panel > OmniGuard for errors
 
 ### Getting Help

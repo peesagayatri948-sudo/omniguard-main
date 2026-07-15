@@ -234,7 +234,7 @@ omniguard graph . --format json
 omniguard audit .
 
 # Watch for changes
-omniguard watch
+omniguard scan watch    # or: omniguard scan --watch
 
 # Install git hooks
 omniguard install-hooks
@@ -291,12 +291,14 @@ Or edit VS Code settings:
 
 ```json
 {
-  "omniguard.supabaseUrl": "https://your-project.supabase.co/functions/v1",
-  "omniguard.apiKey": "og_live_xxxxx",
+  "omniguard.supabaseUrl": "https://your-project.supabase.co",
+  "omniguard.apiKey": "",
   "omniguard.enableOnSave": true,
   "omniguard.enableOnType": true,
-  "omniguard.scanDelay": 500,
   "omniguard.semanticScan": true,
+  "omniguard.scanDelay": 500,
+  "omniguard.failOnSeverity": "high",
+  "omniguard.excludePatterns": ["**/node_modules/**", "**/dist/**", "**/.git/**"],
   "omniguard.cliPath": ""
 }
 ```
