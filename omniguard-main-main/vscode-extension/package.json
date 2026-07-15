@@ -38,7 +38,9 @@
       { "command": "omniguard.clearDiagnostics",  "title": "OmniGuard: Clear Diagnostics" },
       { "command": "omniguard.showFindings",      "title": "OmniGuard: Show Findings Panel" },
       { "command": "omniguard.nexusGraph",        "title": "OmniGuard: Show Architecture Nexus" },
-      { "command": "omniguard.agentMap",          "title": "OmniGuard: Run System Mapping Agent" }
+      { "command": "omniguard.agentMap",          "title": "OmniGuard: Run System Mapping Agent" },
+      { "command": "omniguard.agentRun",          "title": "OmniGuard: Run Multi-Agent Pipeline" },
+      { "command": "omniguard.agentFixFile",      "title": "OmniGuard: Agent Fix Current File" }
     ],
     "configuration": {
       "title": "OmniGuard",
@@ -107,6 +109,11 @@
           "command": "omniguard.explain",
           "group": "omniguard",
           "when": "editorTextFocus && omniguard.hasFindings"
+        },
+        {
+          "command": "omniguard.agentFixFile",
+          "group": "omniguard",
+          "when": "editorTextFocus"
         }
       ],
       "explorer/context": [

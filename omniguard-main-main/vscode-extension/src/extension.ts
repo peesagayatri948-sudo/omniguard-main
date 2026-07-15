@@ -135,6 +135,38 @@ function executeCliScan(filePath: string): Finding[] {
   }
 }
 
+// Async version for real-time scanning — does NOT block the VS Code UI thread
+function executeCliScanAsync(filePath: string): Promise<Finding[]> {
+  return new Promise((resolve) => {
+    const cmd = getCliCommand()
+    const parts = cmd.split(' ')
+    const args = getCliArgs(['scan', '--json', '--semantic', filePath])
+    const child = spawn(parts[0], [...parts.slice(1), ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; try { child.kill('SIGKILL') } catch {} resolve([]) }
+    }, 25000)
+
+    child.stdout?.on('data', (d) => { stdout += d })
+    child.stderr?.on('data', (d) => { stderr += d })
+    child.on('error', () => { if (!settled) { settled = true; clearTimeout(timer); resolve([]) } })
+    child.on('close', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (!stdout) { resolve([]); return }
+      try { const parsed = JSON.parse(stdout); resolve(Array.isArray(parsed.findings) ? parsed.findings : []) }
+      catch { resolve([]) }
+    })
+  })
+}
+
 function executeSemanticScan(filePath: string): SemanticFinding[] {
   const cmd = getCliCommand()
   const parts = cmd.split(' ')
@@ -151,6 +183,35 @@ function executeSemanticScan(filePath: string): SemanticFinding[] {
   } catch {
     return []
   }
+}
+
+// Async semantic scan for real-time path
+function executeSemanticScanAsync(filePath: string): Promise<SemanticFinding[]> {
+  return new Promise((resolve) => {
+    const cmd = getCliCommand()
+    const parts = cmd.split(' ')
+    const child = spawn(parts[0], [...parts.slice(1), 'semantic', '--json', filePath], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let stdout = ''
+    let settled = false
+
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; try { child.kill('SIGKILL') } catch {} resolve([]) }
+    }, 25000)
+
+    child.stdout?.on('data', (d) => { stdout += d })
+    child.on('error', () => { if (!settled) { settled = true; clearTimeout(timer); resolve([]) } })
+    child.on('close', () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (!stdout) { resolve([]); return }
+      try { const parsed = JSON.parse(stdout); resolve(Array.isArray(parsed.findings) ? parsed.findings : []) }
+      catch { resolve([]) }
+    })
+  })
 }
 
 function executeGraphScan(dirPath: string): GraphSnapshot | null {
@@ -187,17 +248,27 @@ function executeAuditReport(dirPath: string): string {
 class DebouncedScanner {
   private timer: NodeJS.Timeout | undefined
   private delay: number
+  private running = false
+  private pending = false
 
   constructor(delay: number) {
     this.delay = delay
   }
 
-  fire(callback: () => void) {
+  fire(callback: () => Promise<void>) {
     if (this.timer) clearTimeout(this.timer)
     this.timer = setTimeout(() => {
-      callback()
       this.timer = undefined
+      this.exec(callback)
     }, this.delay)
+  }
+
+  private async exec(callback: () => Promise<void>) {
+    if (this.running) { this.pending = true; return }
+    this.running = true
+    try { await callback() } catch (e) { console.error('OmniGuard scan error:', e) }
+    this.running = false
+    if (this.pending) { this.pending = false; this.exec(callback) }
   }
 
   cancel() {
@@ -205,6 +276,7 @@ class DebouncedScanner {
       clearTimeout(this.timer)
       this.timer = undefined
     }
+    this.pending = false
   }
 }
 
@@ -438,15 +510,15 @@ export function activate(context: vscode.ExtensionContext) {
   async function runScan(document: vscode.TextDocument) {
     statusBar.text = '$(sync~spin) OmniGuard: scanning...'
 
-    const findings = executeCliScan(document.uri.fsPath)
+    // Run both scans in parallel — async, non-blocking
+    const [findings, semantic] = await Promise.all([
+      executeCliScanAsync(document.uri.fsPath),
+      semanticEnabled ? executeSemanticScanAsync(document.uri.fsPath) : Promise.resolve([]),
+    ])
+
     findingMap.set(document.uri.fsPath, findings)
     treeProvider.update(document.uri, findings)
-
-    // Run semantic scan if enabled
-    if (semanticEnabled) {
-      const semantic = executeSemanticScan(document.uri.fsPath)
-      semanticProvider.update(semantic)
-    }
+    if (semanticEnabled) semanticProvider.update(semantic)
 
     const failOn = config.get<string>('failOnSeverity', 'high')
     const diags = findings.map(f => findingToDiagnostic(f, document, failOn))
@@ -603,6 +675,51 @@ export function activate(context: vscode.ExtensionContext) {
     }
   })
 
+  // ── Multi-Agent Pipeline: full 4-agent run (classify → delegate → build → fix) ──
+  const cmdAgentRun = vscode.commands.registerCommand('omniguard.agentRun', async () => {
+    const folders = vscode.workspace.workspaceFolders
+    if (!folders?.length) return vscode.window.showInformationMessage('Open a workspace first.')
+
+    const choice = await vscode.window.showQuickPick(
+      ['Full Pipeline (classify → delegate → build → fix)', 'Classify Only', 'Classify + Delegate', 'Dry Run (no fixes applied)', 'Explain Pipeline'],
+      { placeHolder: 'Select agent pipeline mode' }
+    )
+    if (!choice) return
+
+    const terminal = vscode.window.createTerminal('OmniGuard Agents')
+    terminal.show()
+
+    const cli = getCliCommand()
+    const parts = cli.split(' ')
+    const cliBase = `${parts[0]} ${parts.slice(1).join(' ')}`.trim()
+
+    if (choice.startsWith('Full')) {
+      terminal.sendText(`${cliBase} agent run --verbose "${folders[0].uri.fsPath}"`)
+    } else if (choice === 'Classify Only') {
+      terminal.sendText(`${cliBase} agent classify "${folders[0].uri.fsPath}"`)
+    } else if (choice === 'Classify + Delegate') {
+      terminal.sendText(`${cliBase} agent delegate "${folders[0].uri.fsPath}"`)
+    } else if (choice === 'Dry Run') {
+      terminal.sendText(`${cliBase} agent run --dry-run --verbose "${folders[0].uri.fsPath}"`)
+    } else if (choice === 'Explain') {
+      terminal.sendText(`${cliBase} agent explain "${folders[0].uri.fsPath}"`)
+    }
+  })
+
+  // ── Agent: fix current file with the pipeline ──
+  const cmdAgentFixFile = vscode.commands.registerCommand('omniguard.agentFixFile', async () => {
+    const editor = vscode.window.activeTextEditor
+    if (!editor) return vscode.window.showInformationMessage('Open a file first.')
+
+    const cli = getCliCommand()
+    const parts = cli.split(' ')
+    const cliBase = `${parts[0]} ${parts.slice(1).join(' ')}`.trim()
+
+    const terminal = vscode.window.createTerminal('OmniGuard Agent Fix')
+    terminal.show()
+    terminal.sendText(`${cliBase} agent fix "${editor.document.uri.fsPath}"`)
+  })
+
   // ─── Real-Time Watchers ───────────────────────────────────────────────────
 
   // On-save scanning
@@ -632,6 +749,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     cmdScanFile, cmdScanWorkspace, cmdSemanticScan, cmdShowGraph, cmdAuditReport,
     cmdExplain, cmdConfigure, cmdClear, cmdShow, cmdNexusGraph, cmdAgentMap,
+    cmdAgentRun, cmdAgentFixFile,
     onSave, onType, onEditorChange
   )
 

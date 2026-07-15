@@ -114,6 +114,7 @@ async function remoteScan(filePath, content) {
 const semanticEngine = require('./semanticEngine')
 const graphEngine = require('./graphEngine')
 const auditClauseMapper = require('./auditClauseMapper')
+const agentEngine = require('./agentEngine')
 
 async function scanFiles(files, options = {}) {
   const { semantic = true, generateGraph = false, rootDir = process.cwd() } = options
@@ -1951,8 +1952,8 @@ const namespaces = {
   },
   agent: {
     map: (args) => {
-      const path = args[0] || '.';
-      console.log(c.blue(`System Mapping Agent running: Auditing code, IaC, and layout schemas under ${path}...`));
+      const target = args[0] || '.';
+      console.log(c.blue(`System Mapping Agent running: Auditing code, IaC, and layout schemas under ${target}...`));
       console.log(c.green('✓ Map built: 3 architecture models successfully pushed to Architecture Nexus.'));
     },
     graph: () => {
@@ -1963,6 +1964,118 @@ const namespaces = {
       const framework = args[0] || 'NIST';
       console.log(c.blue(`Reporting Agent running: Generating compliance reports for ${framework}...`));
       console.log(c.green(`✓ Board-ready report saved to workspace: ${framework.toLowerCase()}-audit-evidence.json`));
+    },
+    // ── Multi-Agent Pipeline (v2.2.5) ──
+    run: async (args) => {
+      const target = args.find(a => !a.startsWith('-')) || '.'
+      const dryRun = args.includes('--dry-run') || args.includes('--dry')
+      const noApply = args.includes('--no-apply')
+      const json = args.includes('--json') || args.includes('-j')
+      const verbose = args.includes('--verbose') || args.includes('-v')
+
+      if (verbose) process.env.OMNIGUARD_AGENT_DEBUG = '1'
+
+      console.log(c.cyan(c.bold('\n🤖 OmniGuard Multi-Agent Pipeline')))
+      console.log(c.dim(`  Target: ${target}`))
+      console.log(c.dim(`  Mode: ${dryRun ? 'dry-run (classify + delegate only)' : noApply ? 'build (no apply)' : 'full (classify → delegate → build → fix)'}`))
+
+      // Step 1: Scan to get findings
+      console.log(c.dim('\n  Scanning for findings...'))
+      const files = target === '.' ? walkDir(process.cwd()) : [path.resolve(target)]
+      const findings = await scanFiles(files, { semantic: true, generateGraph: false, rootDir: process.cwd() })
+      console.log(c.dim(`  Found ${findings.length} findings`))
+
+      if (findings.length === 0) {
+        console.log(c.green('\n  ✓ No findings to process — codebase is clean!'))
+        return
+      }
+
+      // Step 2: Run the 4-agent pipeline
+      const orchestrator = new agentEngine.AgentOrchestrator(process.cwd())
+      const result = await orchestrator.run(findings, { dryRun, applyFixes: !noApply })
+
+      if (json) {
+        console.log(JSON.stringify(result, null, 2))
+        return
+      }
+
+      // Print human-readable report
+      const report = orchestrator.generateReport(result)
+      console.log(report)
+
+      // Print agent event log if verbose
+      if (verbose && result.events?.length) {
+        console.log(c.cyan('\n  Agent Event Log:'))
+        for (const e of result.events) {
+          console.log(c.dim(`    [${e.timestamp}] ${e.agent}: ${e.message}`))
+        }
+      }
+    },
+    classify: async (args) => {
+      // Run only the classifier agent
+      const target = args.find(a => !a.startsWith('-')) || '.'
+      const json = args.includes('--json') || args.includes('-j')
+      const files = target === '.' ? walkDir(process.cwd()) : [path.resolve(target)]
+      const findings = await scanFiles(files, { semantic: true, generateGraph: false, rootDir: process.cwd() })
+      const classifier = new agentEngine.ClassifierAgent()
+      const classified = await classifier.run(findings)
+      if (json) { console.log(JSON.stringify(classified, null, 2)); return }
+      console.log(c.cyan('\n╔══ Classifier Agent ══╗'))
+      const byPriority = {}
+      for (const f of (Array.isArray(classified) ? classified : [])) {
+        byPriority[f.priority] = (byPriority[f.priority] || 0) + 1
+      }
+      for (const [p, count] of Object.entries(byPriority).sort()) {
+        const color = p === 'P0' ? c.red : p === 'P1' ? c.yellow : c.dim
+        console.log(`  ${color(p)}: ${count}`)
+      }
+      console.log(c.cyan('╚══════════════════════╝'))
+    },
+    delegate: async (args) => {
+      // Run classifier + delegator
+      const target = args.find(a => !a.startsWith('-')) || '.'
+      const files = target === '.' ? walkDir(process.cwd()) : [path.resolve(target)]
+      const findings = await scanFiles(files, { semantic: true, generateGraph: false, rootDir: process.cwd() })
+      const classifier = new agentEngine.ClassifierAgent()
+      const delegator = new agentEngine.DelegatorAgent()
+      const classified = await classifier.run(findings)
+      const tasks = await delegator.run(classified)
+      console.log(c.cyan('\n╔══ Delegator Agent ══╗'))
+      for (const t of (Array.isArray(tasks) ? tasks : [])) {
+        console.log(`  ${t.finding_id}: ${t.strategy} → ${t.assigned_agent} (${t.fix_complexity})`)
+      }
+      console.log(c.cyan('╚══════════════════════╝'))
+    },
+    fix: async (args) => {
+      // Run the full pipeline with fixes applied
+      args = args.filter(a => a !== 'fix')
+      await namespaces.agent.run(args)
+    },
+    explain: async (args) => {
+      // Explain what each agent would do with current findings
+      const target = args.find(a => !a.startsWith('-')) || '.'
+      const files = target === '.' ? walkDir(process.cwd()) : [path.resolve(target)]
+      const findings = await scanFiles(files, { semantic: true, generateGraph: false, rootDir: process.cwd() })
+
+      console.log(c.cyan(c.bold('\n🤖 Agent Pipeline Explanation')))
+      console.log(c.dim(`  Based on ${findings.length} findings:\n`))
+
+      console.log(c.blue('  1. CLASSIFIER') + c.dim(' — analyzes and categorizes findings'))
+      const cats = {}
+      for (const f of findings) { cats[f.scanner || f.category || 'unknown'] = (cats[f.scanner || f.category || 'unknown'] || 0) + 1 }
+      for (const [cat, count] of Object.entries(cats)) {
+        console.log(c.dim(`     ${cat}: ${count} findings`))
+      }
+
+      console.log(c.blue('\n  2. DELEGATOR') + c.dim(' — assigns fix strategy per finding'))
+      console.log(c.dim('     Determines: auto_fix vs manual_review vs accept_risk'))
+
+      console.log(c.blue('\n  3. BUILDER') + c.dim(' — generates code patches'))
+      console.log(c.dim('     Creates: unified diffs, test snippets, compliance notes'))
+
+      console.log(c.blue('\n  4. FIXER') + c.dim(' — applies, validates, and verifies fixes'))
+      console.log(c.dim('     Checks: syntax, tests, re-scan, AI verification'))
+      console.log(c.dim('     Rolls back if fix introduces regression\n'))
     }
   }
 }
@@ -2181,7 +2294,7 @@ async function main() {
   const secondArg = args[1]
 
   // Pre-Authentication Gatekeeper: Protected commands require an active API key
-  const bypassCommands = ['login', 'signup', 'version', 'doctor', 'tui', 'help', '-h', '--help', 'semantic', 'graph', 'audit', 'aws-scan']
+  const bypassCommands = ['login', 'signup', 'version', 'doctor', 'tui', 'help', '-h', '--help', 'semantic', 'graph', 'audit', 'aws-scan', 'agent']
   const current = api.cfg()
   if (!current.apiKey && !bypassCommands.includes(firstArg)) {
     console.error(c.red(`Error: Authentication required. Please run 'omniguard login' or 'omniguard signup' first.`))
