@@ -1,0 +1,30 @@
+{
+  "PricingModel": "SaaS / Metered + Contract",
+  "Tiers": [
+    {
+      "Name": "OmniGuard Developer Free Tier",
+      "Description": "Up to 5 connected repositories and basic local scans.",
+      "BasePriceUSD": 0.00
+    },
+    {
+      "Name": "OmniGuard Enterprise Pro Tier",
+      "Description": "Unlimited connected repositories, deep AI multi-tier scanner pipeline, policy orchestration, and compliance audits.",
+      "BasePriceUSD": 499.00,
+      "BillingPeriod": "Monthly"
+    }
+  ],
+  "MeteredDimensions": [
+    {
+      "DimensionKey": "additional_scans",
+      "Description": "Completed repository scans above the 100 scans base limit per month.",
+      "Unit": "Scan Run",
+      "PricePerUnitUSD": 0.05
+    },
+    {
+      "DimensionKey": "active_developers",
+      "Description": "Active git developer profiles scanned within the organization during the billing cycle.",
+      "Unit": "Developer Profile",
+      "PricePerUnitUSD": 12.00
+    }
+  ]
+}
