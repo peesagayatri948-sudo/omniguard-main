@@ -1,0 +1,52 @@
+{
+  "name": "omniguard-enterprise-cli",
+  "version": "2.2.5",
+  "description": "OmniGuard Enterprise — AI-Powered Application Security Platform CLI with Semantic Scanning, Taint Analysis, and Deterministic Compliance Clause Mapping",
+  "main": "src/index.js",
+  "bin": {
+    "omniguard": "./src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "security",
+    "appsec",
+    "secrets",
+    "sast",
+    "devsecops",
+    "semantic",
+    "taint-analysis",
+    "compliance",
+    "audit",
+    "graph",
+    "architecture",
+    "owasp",
+    "pci-dss",
+    "nist",
+    "iso27001",
+    "sbom",
+    "sbom",
+    "iac",
+    "sca",
+    "container-security",
+    "ai-agents",
+    "multi-agent",
+    "auto-remediation",
+    "autonomous-fix"
+  ],
+  "license": "MIT",
+  "files": [
+    "src/"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node src/index.js version",
+    "lint": "node -c src/index.js",
+    "prepublishOnly": "node -c src/index.js && node -c src/semanticEngine.js && node -c src/graphEngine.js && node -c src/auditClauseMapper.js && node -c src/agentEngine.js"
+  },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "js-yaml": "^5.2.1"
+  }
+}

@@ -1,0 +1,27 @@
+# OmniGuard Enterprise CLI v2.2.5 — Docker Image
+# For AWS pro-level project scanning via Docker/ECS
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install git (for hook scans) and AWS CLI (for AWS pro scanning)
+RUN apk add --no-cache git python3 py3-pip && \
+    pip3 install --no-cache-dir awscli
+
+# Copy CLI source
+COPY package.json package-lock.json ./
+RUN npm ci --production
+
+COPY src/ ./src/
+COPY mcp-server.js ./
+
+# Install globally
+RUN npm link
+
+# Default to scan command
+ENV NODE_ENV=production
+ENV OMNIGUARD_SCAN_TIER=standard
+
+ENTRYPOINT ["omniguard"]
+CMD ["scan", "--help"]

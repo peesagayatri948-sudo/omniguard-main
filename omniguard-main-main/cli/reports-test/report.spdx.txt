@@ -1,0 +1,28 @@
+SPDXVersion: SPDX-2.3
+DataLicense: CC0-1.0
+SPDXID: SPDXRef-Document
+DocumentName: OmniGuard-SBOM
+DocumentNamespace: https://omniguard.dev/spdx/omniguard-sbom-1783869327499
+Creator: Tool: OmniGuard-2.0.0
+Created: 2026-07-12T15:15:27.499Z
+
+PackageName: db.js
+SPDXID: SPDXRef-Package-0
+PackageVersion: 1.0.0
+PackageDownloadLocation: NOASSERTION
+FilesAnalyzed: false
+PackageLicenseConcluded: NOASSERTION
+PackageLicenseDeclared: NOASSERTION
+PackageCopyrightText: NOASSERTION
+ExternalRef: SECURITY advisories SAST-INJ-001
+
+PackageName: main.tf
+SPDXID: SPDXRef-Package-1
+PackageVersion: 1.0.0
+PackageDownloadLocation: NOASSERTION
+FilesAnalyzed: false
+PackageLicenseConcluded: NOASSERTION
+PackageLicenseDeclared: NOASSERTION
+PackageCopyrightText: NOASSERTION
+ExternalRef: SECURITY advisories IAC-SEC-001
+

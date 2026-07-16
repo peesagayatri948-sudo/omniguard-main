@@ -1,0 +1,149 @@
+{
+  "name": "omniguard",
+  "displayName": "OmniGuard Security",
+  "description": "AI-powered application security scanner — semantic scanning, taint analysis, inline diagnostics, and AI remediation",
+  "version": "2.2.5",
+  "publisher": "omniguard",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Suryavamsiram/omniguard-enterprise"
+  },
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Linters", "Other"],
+  "keywords": ["security", "secrets", "sast", "appsec", "semantic", "taint-analysis", "compliance", "omniguard"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "omniguard", "title": "OmniGuard Security", "icon": "$(shield)" }
+      ]
+    },
+    "views": {
+      "omniguard": [
+        { "id": "omniguardFindings", "name": "Security Findings" },
+        { "id": "omniguardSemantic", "name": "Semantic Analysis" },
+        { "id": "omniguardGraph", "name": "Architecture Graph" }
+      ]
+    },
+    "commands": [
+      { "command": "omniguard.scanFile",          "title": "OmniGuard: Scan Current File" },
+      { "command": "omniguard.scanWorkspace",     "title": "OmniGuard: Scan Workspace" },
+      { "command": "omniguard.semanticScan",      "title": "OmniGuard: Semantic Scan (AI-Powered)" },
+      { "command": "omniguard.showGraph",         "title": "OmniGuard: Show Architecture Graph" },
+      { "command": "omniguard.auditReport",       "title": "OmniGuard: Generate Compliance Audit" },
+      { "command": "omniguard.explain",           "title": "OmniGuard: AI Explain Finding" },
+      { "command": "omniguard.configure",         "title": "OmniGuard: Configure" },
+      { "command": "omniguard.clearDiagnostics",  "title": "OmniGuard: Clear Diagnostics" },
+      { "command": "omniguard.showFindings",      "title": "OmniGuard: Show Findings Panel" },
+      { "command": "omniguard.nexusGraph",        "title": "OmniGuard: Show Architecture Nexus" },
+      { "command": "omniguard.agentMap",          "title": "OmniGuard: Run System Mapping Agent" },
+      { "command": "omniguard.agentRun",          "title": "OmniGuard: Run Multi-Agent Pipeline" },
+      { "command": "omniguard.agentFixFile",      "title": "OmniGuard: Agent Fix Current File" }
+    ],
+    "configuration": {
+      "title": "OmniGuard",
+      "properties": {
+        "omniguard.supabaseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Supabase project Functions URL (e.g. https://id.supabase.co/functions/v1)"
+        },
+        "omniguard.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OmniGuard API key from Dashboard → Settings → API Keys"
+        },
+        "omniguard.enableOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan files automatically on save"
+        },
+        "omniguard.enableOnType": {
+          "type": "boolean",
+          "default": true,
+          "description": "Scan files while typing (debounced real-time)"
+        },
+        "omniguard.semanticScan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered semantic scanning (taint tracking, data flow analysis)"
+        },
+        "omniguard.failOnSeverity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low", "info"],
+          "default": "high",
+          "description": "Minimum severity to show as an error (vs warning)"
+        },
+        "omniguard.scanDelay": {
+          "type": "number",
+          "default": 500,
+          "description": "Debounce delay in ms for on-type real-time scanning"
+        },
+        "omniguard.excludePatterns": {
+          "type": "array",
+          "default": ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.git/**"],
+          "description": "Glob patterns to exclude from scanning"
+        },
+        "omniguard.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to omniguard-enterprise-cli binary (auto-detected if empty)"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "omniguard.scanFile",
+          "group": "omniguard",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "omniguard.semanticScan",
+          "group": "omniguard",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "omniguard.explain",
+          "group": "omniguard",
+          "when": "editorTextFocus && omniguard.hasFindings"
+        },
+        {
+          "command": "omniguard.agentFixFile",
+          "group": "omniguard",
+          "when": "editorTextFocus"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "omniguard.scanWorkspace",
+          "group": "omniguard"
+        },
+        {
+          "command": "omniguard.auditReport",
+          "group": "omniguard"
+        }
+      ]
+    },
+    "statusBar": []
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package --no-yarn",
+    "publish-ext": "vsce publish --no-yarn"
+  },
+  "dependencies": {
+    "omniguard-enterprise-cli": "^2.2.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.3.0"
+  }
+}

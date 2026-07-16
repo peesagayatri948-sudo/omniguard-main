@@ -1,0 +1,91 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-07-12T15:15:27.495Z",
+    "tool": {
+      "components": [
+        {
+          "type": "application",
+          "name": "OmniGuard",
+          "version": "2.0.0"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "comp-0",
+      "type": "library",
+      "name": "db.js",
+      "version": "1.0.0",
+      "purl": "pkg:generic/db.js@1.0.0",
+      "properties": [
+        {
+          "name": "file_path",
+          "value": "db.js"
+        },
+        {
+          "name": "line",
+          "value": "12"
+        }
+      ]
+    },
+    {
+      "bom-ref": "comp-1",
+      "type": "library",
+      "name": "main.tf",
+      "version": "1.0.0",
+      "purl": "pkg:generic/main.tf@1.0.0",
+      "properties": [
+        {
+          "name": "file_path",
+          "value": "main.tf"
+        },
+        {
+          "name": "line",
+          "value": "4"
+        }
+      ]
+    }
+  ],
+  "vulnerabilities": [
+    {
+      "id": "SAST-INJ-001",
+      "source": {
+        "name": "OmniGuard"
+      },
+      "ratings": [
+        {
+          "severity": "critical",
+          "method": "CVSSv3"
+        }
+      ],
+      "description": "SQL Injection",
+      "affects": [
+        {
+          "ref": "comp-0"
+        }
+      ]
+    },
+    {
+      "id": "IAC-SEC-001",
+      "source": {
+        "name": "OmniGuard"
+      },
+      "ratings": [
+        {
+          "severity": "high",
+          "method": "CVSSv3"
+        }
+      ],
+      "description": "Open Port 22",
+      "affects": [
+        {
+          "ref": "comp-1"
+        }
+      ]
+    }
+  ]
+}

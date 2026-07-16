@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "OmniGuard",
+          "version": "2.0.0",
+          "informationUri": "https://omniguard.dev",
+          "rules": [
+            {
+              "id": "SAST-INJ-001",
+              "name": "SQL Injection",
+              "shortDescription": {
+                "text": "SQL Injection"
+              }
+            },
+            {
+              "id": "IAC-SEC-001",
+              "name": "Open Port 22",
+              "shortDescription": {
+                "text": "Open Port 22"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "SAST-INJ-001",
+          "level": "error",
+          "message": {
+            "text": "SQL Injection"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "db.js"
+                },
+                "region": {
+                  "startLine": 12
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "IAC-SEC-001",
+          "level": "error",
+          "message": {
+            "text": "Open Port 22"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "main.tf"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

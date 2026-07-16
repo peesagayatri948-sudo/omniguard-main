@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'OmniGuard v2.2.5 — AWS Pro Scanning Service (ECS Fargate)'
+
+Parameters:
+  DockerImage:
+    Type: String
+    Default: 'omniguard/cli:2.2.5'
+    Description: OmniGuard CLI Docker image for pro scanning
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet for the ECS task
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group for the ECS task
+  SupabaseUrl:
+    Type: String
+    Description: Supabase project URL
+  SupabaseAnonKey:
+    Type: String
+    Description: Supabase anon key
+  SupabaseServiceKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase service role key (for server-side scan operations)
+  AiProviderApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: AI provider API key (OpenAI/Anthropic/Bedrock) for semantic scanning
+  AwsScanAccessKeyId:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: AWS access key for ECR/Lambda/IAM scanning (pro scan)
+  AwsScanSecretAccessKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: AWS secret key for pro scanning
+  AwsScanRegion:
+    Type: String
+    Default: 'us-east-1'
+    Description: AWS region to scan
+
+Resources:
+  # ── ECS Cluster ──
+  OmniGuardCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: omniguard-pro-scan
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+
+  # ── CloudWatch Log Group ──
+  OmniGuardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/omniguard-pro-scan
+      RetentionInDays: 30
+
+  # ── IAM Role for ECS Task Execution ──
+  OmniGuardTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: OmniGuardScanAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:DescribeRepositories
+                  - ecr:DescribeImages
+                  - ecr:ListImages
+                  - ecr:GetRepositoryPolicy
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                  - lambda:GetFunction
+                  - lambda:GetPolicy
+                  - lambda:GetFunctionConfiguration
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:ListPolicies
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:ListRoles
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketAcl
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketEncryption
+                Resource: '*'
+
+  # ── Task Definition ──
+  OmniGuardTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: omniguard-pro-scan
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '2048'
+      Memory: '4096'
+      ExecutionRoleArn: !GetAtt OmniGuardTaskRole.Arn
+      TaskRoleArn: !GetAtt OmniGuardTaskRole.Arn
+      ContainerDefinitions:
+        - Name: omniguard-scanner
+          Image: !Ref DockerImage
+          Essential: true
+          Cpu: 2048
+          Memory: 4096
+          Command:
+            - 'scan'
+            - '--pro'
+            - '--aws-scan'
+            - '--semantic'
+            - '--audit'
+            - '--output'
+            - '/tmp/reports'
+          Environment:
+            - Name: SUPABASE_URL
+              Value: !Ref SupabaseUrl
+            - Name: SUPABASE_ANON_KEY
+              Value: !Ref SupabaseAnonKey
+            - Name: AWS_SCAN_REGION
+              Value: !Ref AwsScanRegion
+            - Name: OMNIGUARD_SCAN_TIER
+              Value: 'pro'
+            - Name: NODE_ENV
+              Value: 'production'
+          Secrets:
+            - Name: SUPABASE_SERVICE_KEY
+              ValueFrom: !Ref SupabaseServiceKeySecret
+            - Name: AI_PROVIDER_API_KEY
+              ValueFrom: !Ref AiApiKeySecret
+            - Name: AWS_ACCESS_KEY_ID
+              ValueFrom: !Ref AwsScanKeyIdSecret
+            - Name: AWS_SECRET_ACCESS_KEY
+              ValueFrom: !Ref AwsScanSecretKeySecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref OmniGuardLogGroup
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: omniguard
+
+  # ── Secrets in Secrets Manager ──
+  SupabaseServiceKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: omniguard/supabase-service-key
+      SecretString: !Ref SupabaseServiceKey
+
+  AiApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: omniguard/ai-api-key
+      SecretString: !Ref AiProviderApiKey
+
+  AwsScanKeyIdSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: omniguard/aws-scan-key-id
+      SecretString: !Ref AwsScanAccessKeyId
+
+  AwsScanSecretKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: omniguard/aws-scan-secret-key
+      SecretString: !Ref AwsScanSecretAccessKey
+
+  # ── Scheduled Scan (EventBridge → ECS) ──
+  OmniGuardScheduledScan:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: omniguard-scheduled-pro-scan
+      ScheduleExpression: 'rate(12 hours)'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt OmniGuardCluster.Arn
+          RoleArn: !GetAtt OmniGuardEventRole.Arn
+          EcsParameters:
+            TaskDefinitionArn: !Ref OmniGuardTaskDefinition
+            TaskCount: 1
+            LaunchType: FARGATE
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                Subnets: [!Ref SubnetId]
+                SecurityGroups: [!Ref SecurityGroupId]
+
+  OmniGuardEventRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OmniGuardEventECS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Ref OmniGuardTaskDefinition
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: '*'
+
+Outputs:
+  ClusterArn:
+    Value: !GetAtt OmniGuardCluster.Arn
+  TaskDefinitionArn:
+    Value: !Ref OmniGuardTaskDefinition
+  LogGroupName:
+    Value: !Ref OmniGuardLogGroup
+  ManualRunCommand:
+    Description: 'Manually trigger a pro scan'
+    Value: !Sub 'aws ecs run-task --cluster omniguard-pro-scan --task-definition ${OmniGuardTaskDefinition} --launch-type FARGATE --network-configuration "awsvpcConfiguration={subnets=[${SubnetId}],securityGroups=[${SecurityGroupId}]}"'

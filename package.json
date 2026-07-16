@@ -1,0 +1,18 @@
+{
+  "name": "omniguard-platform",
+  "private": true,
+  "version": "2.2.5",
+  "type": "module",
+  "description": "OmniGuard — AI-Native Enterprise DevSecOps Platform",
+  "scripts": {
+    "dev": "npm --prefix omniguard-main-main/omniguard run dev",
+    "build": "npm --prefix omniguard-main-main/omniguard run build",
+    "preview": "npm --prefix omniguard-main-main/omniguard run preview",
+    "install:app": "npm --prefix omniguard-main-main/omniguard install",
+    "install:cli": "npm --prefix omniguard-main-main/cli install",
+    "install:ext": "npm --prefix omniguard-main-main/vscode-extension install"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
